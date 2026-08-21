@@ -1,0 +1,27 @@
+# AWS Amplify Hosting build spec — KaBarangayConnect frontend client
+# For Next.js App Router with SSR/compute hosting (gen2 format).
+# Docs: https://docs.aws.amazon.com/amplify/latest/userguide/build-settings.html
+version: 1
+backend:
+  phases:
+    build:
+      commands:
+        - echo "No Amplify Gen 2 backend defined for this repo." && exit 0
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - npm ci
+        - node --version
+    build:
+      commands:
+        - npm run build:amplify
+  artifacts:
+    # Next.js SSR/compute hosting (rocks.infra.compute.rendering).
+    # Amplify inspects the build output and auto-provisions the compute runtime.
+    baseDirectory: .next
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*

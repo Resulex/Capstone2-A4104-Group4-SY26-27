@@ -1,0 +1,906 @@
+service: kabarangayconnect-backend
+
+frameworkVersion: "3"
+
+# Load variables from the local .env file so ${env:...} references resolve
+# (Serverless v3 does NOT load .env automatically). Must be top-level.
+useDotenv: true
+
+# Optional: reference a specific provider profile
+# provider:
+#   profile: kabarangayconnect
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ${env:AWS_REGION, 'ap-southeast-1'}
+  stage: ${env:STAGE, 'dev'}
+  versionFunctions: false
+  memorySize: 1024
+  timeout: 30
+  environment:
+    MONGODB_URI: ${env:MONGODB_URI, ''}
+    JWT_SECRET: ${env:JWT_SECRET, ''}
+    JWT_EXPIRES_IN: ${env:JWT_EXPIRES_IN, '7d'}
+    NODE_ENV: production
+    # Admin MFA (TOTP) via Google Authenticator
+    TOTP_ISSUER: ${env:TOTP_ISSUER, 'KaBarangayConnect'}
+    TOTP_SECRET_ENCRYPTION_KEY: ${env:TOTP_SECRET_ENCRYPTION_KEY, ''}
+    # Short-lived enrollment JWT issued pre-MFA-enrollment for TOTP setup
+    TOTP_ENROLLMENT_JWT_TTL: ${env:TOTP_ENROLLMENT_JWT_TTL, '10m'}
+    # Resident Google SSO
+    GOOGLE_CLIENT_ID: ${env:GOOGLE_CLIENT_ID, ''}
+    GOOGLE_CLIENT_SECRET: ${env:GOOGLE_CLIENT_SECRET, ''}
+    GOOGLE_REDIRECT_URI: ${env:GOOGLE_REDIRECT_URI, ''}
+
+  # IAM role for the Lambda functions. The default role is used here;
+  # extend as needed (e.g. S3, SNS, SES permissions).
+  iam:
+    role:
+      statements: []
+
+plugins:
+  - serverless-esbuild
+  - serverless-offline
+
+custom:
+  esbuild:
+    bundle: true
+    # Minify and drop sourcemaps for deployment. Without these, the shared
+    # service zip balloons past Lambda's 250 MB unzipped-size limit: each
+    # bundle ships a ~6.5 MB .map plus an unminified handler.js.
+    # Every function's bundle lives in one zip that AWS unzips on deploy.
+    minify: true
+    sourcemap: false
+    target: node20
+    platform: node
+    concurrency: 10
+    external:
+      - aws-sdk
+    # Keep this list in sync with the functions in the `functions` block.
+    # Each function-per-use-case handler is bundled independently.
+    packager: npm
+    watch: true
+  serverless-offline:
+    port: 3001
+    reloadHandler: true
+
+functions:
+  # ---------------------------------------------------------------------------
+  # Auth — Register
+  # Use-case: create a new user account.
+  # Handler: src/features/auth/register/handler.ts
+  # API:     POST /auth/register
+  # ---------------------------------------------------------------------------
+  auth-register:
+    handler: src/features/auth/register/handler.handler
+    events:
+      - http:
+          path: auth/register
+          method: post
+          cors: true
+
+  # ---------------------------------------------------------------------------
+  # Auth — Admin Login (username/email + password + TOTP)
+  # Use-case: authenticate an admin with step-up MFA before issuing a JWT.
+  # Handler: src/features/auth/admin-login/handler.ts
+  # API:     POST /auth/admin/login
+  # ---------------------------------------------------------------------------
+  auth-admin-login:
+    handler: src/features/auth/admin-login/handler.handler
+    events:
+      - http:
+          path: auth/admin/login
+          method: post
+          cors: true
+
+  # ---------------------------------------------------------------------------
+  # Auth — Admin TOTP Setup
+  # Use-case: generate a TOTP secret + otpauth URI for an admin.
+  # Handler: src/features/auth/admin-totp/handler.ts  (setupAdminTotp)
+  # API:     POST /auth/admin/totp/setup  (admin only)
+  # ---------------------------------------------------------------------------
+  auth-admin-totp-setup:
+    handler: src/features/auth/admin-totp/handler.setupTotpHandler
+    events:
+      - http:
+          path: auth/admin/totp/setup
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Auth — Admin TOTP Verify
+  # Use-case: confirm the admin's TOTP code and issue recovery codes.
+  # Handler: src/features/auth/admin-totp/handler.ts  (verifyAdminTotp)
+  # API:     POST /auth/admin/totp/verify  (admin only)
+  # ---------------------------------------------------------------------------
+  auth-admin-totp-verify:
+    handler: src/features/auth/admin-totp/handler.verifyTotpHandler
+    events:
+      - http:
+          path: auth/admin/totp/verify
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Auth — Resident Google SSO Start
+  # Use-case: generate a Google OAuth URL for resident sign-in.
+  # Handler: src/features/auth/resident-sso/handler.ts  (startGoogleLogin)
+  # API:     GET /auth/resident/google
+  # ---------------------------------------------------------------------------
+  auth-resident-google:
+    handler: src/features/auth/resident-sso/handler.startHandler
+    events:
+      - http:
+          path: auth/resident/google
+          method: get
+          cors: true
+
+  # ---------------------------------------------------------------------------
+  # Auth — Resident Google SSO Callback
+  # Use-case: exchange code, verify Google ID token, provision/login resident.
+  # Handler: src/features/auth/resident-sso/handler.ts  (googleLoginCallback)
+  # API:     GET /auth/resident/google/callback
+  # ---------------------------------------------------------------------------
+  auth-resident-google-callback:
+    handler: src/features/auth/resident-sso/handler.callbackHandler
+    events:
+      - http:
+          path: auth/resident/google/callback
+          method: get
+          cors: true
+
+  # ---------------------------------------------------------------------------
+  # Auth — Login
+  # Use-case: authenticate a user and return a JWT.
+  # Handler: src/features/auth/login/handler.ts
+  # API:     POST /auth/login
+  # ---------------------------------------------------------------------------
+  auth-login:
+    handler: src/features/auth/login/handler.handler
+    events:
+      - http:
+          path: auth/login
+          method: post
+          cors: true
+
+  # ---------------------------------------------------------------------------
+  # Users — Get Profile
+  # Use-case: fetch the authenticated user's own profile.
+  # Handler: src/features/users/get-profile/handler.ts
+  # API:     GET  /users/me   (protected by custom JWT authorizer)
+  # ---------------------------------------------------------------------------
+  users-get-profile:
+    handler: src/features/users/get-profile/handler.handler
+    events:
+      - http:
+          path: users/me
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Users — CRUD (aside from /users/me above)
+  # ---------------------------------------------------------------------------
+  users-create:
+    handler: src/features/users/create/handler.handler
+    events:
+      - http:
+          path: users
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  users-list:
+    handler: src/features/users/list/handler.handler
+    events:
+      - http:
+          path: users
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  users-get:
+    handler: src/features/users/get/handler.handler
+    events:
+      - http:
+          path: users/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  users-update:
+    handler: src/features/users/update/handler.handler
+    events:
+      - http:
+          path: users/{id}
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  users-delete:
+    handler: src/features/users/delete/handler.handler
+    events:
+      - http:
+          path: users/{id}
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Residents — CRUD
+  # ---------------------------------------------------------------------------
+  residents-create:
+    handler: src/features/residents/create/handler.handler
+    events:
+      - http:
+          path: residents
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  residents-list:
+    handler: src/features/residents/list/handler.handler
+    events:
+      - http:
+          path: residents
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  residents-get:
+    handler: src/features/residents/get/handler.handler
+    events:
+      - http:
+          path: residents/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  residents-update:
+    handler: src/features/residents/update/handler.handler
+    events:
+      - http:
+          path: residents/{id}
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  residents-delete:
+    handler: src/features/residents/delete/handler.handler
+    events:
+      - http:
+          path: residents/{id}
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Admins — CRUD
+  # ---------------------------------------------------------------------------
+  admins-create:
+    handler: src/features/admins/create/handler.handler
+    events:
+      - http:
+          path: admins
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  admins-list:
+    handler: src/features/admins/list/handler.handler
+    events:
+      - http:
+          path: admins
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  admins-get:
+    handler: src/features/admins/get/handler.handler
+    events:
+      - http:
+          path: admins/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  admins-update:
+    handler: src/features/admins/update/handler.handler
+    events:
+      - http:
+          path: admins/{id}
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  admins-delete:
+    handler: src/features/admins/delete/handler.handler
+    events:
+      - http:
+          path: admins/{id}
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Officials — CRUD
+  # ---------------------------------------------------------------------------
+  officials-create:
+    handler: src/features/officials/create/handler.handler
+    events:
+      - http:
+          path: officials
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  officials-list:
+    handler: src/features/officials/list/handler.handler
+    events:
+      - http:
+          path: officials
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  officials-get:
+    handler: src/features/officials/get/handler.handler
+    events:
+      - http:
+          path: officials/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  officials-update:
+    handler: src/features/officials/update/handler.handler
+    events:
+      - http:
+          path: officials/{id}
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  officials-delete:
+    handler: src/features/officials/delete/handler.handler
+    events:
+      - http:
+          path: officials/{id}
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Announcements — CRUD
+  # ---------------------------------------------------------------------------
+  announcements-create:
+    handler: src/features/announcements/create/handler.handler
+    events:
+      - http:
+          path: announcements
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  announcements-list:
+    handler: src/features/announcements/list/handler.handler
+    events:
+      - http:
+          path: announcements
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  announcements-get:
+    handler: src/features/announcements/get/handler.handler
+    events:
+      - http:
+          path: announcements/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  announcements-update:
+    handler: src/features/announcements/update/handler.handler
+    events:
+      - http:
+          path: announcements/{id}
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  announcements-delete:
+    handler: src/features/announcements/delete/handler.handler
+    events:
+      - http:
+          path: announcements/{id}
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Document Requests — CRUD
+  # ---------------------------------------------------------------------------
+  document-requests-create:
+    handler: src/features/document-requests/create/handler.handler
+    events:
+      - http:
+          path: document-requests
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  document-requests-list:
+    handler: src/features/document-requests/list/handler.handler
+    events:
+      - http:
+          path: document-requests
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  document-requests-get:
+    handler: src/features/document-requests/get/handler.handler
+    events:
+      - http:
+          path: document-requests/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  document-requests-update:
+    handler: src/features/document-requests/update/handler.handler
+    events:
+      - http:
+          path: document-requests/{id}
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  document-requests-delete:
+    handler: src/features/document-requests/delete/handler.handler
+    events:
+      - http:
+          path: document-requests/{id}
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Incident Reports — CRUD
+  # ---------------------------------------------------------------------------
+  incident-reports-create:
+    handler: src/features/incident-reports/create/handler.handler
+    events:
+      - http:
+          path: incident-reports
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  incident-reports-list:
+    handler: src/features/incident-reports/list/handler.handler
+    events:
+      - http:
+          path: incident-reports
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  incident-reports-get:
+    handler: src/features/incident-reports/get/handler.handler
+    events:
+      - http:
+          path: incident-reports/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  incident-reports-update:
+    handler: src/features/incident-reports/update/handler.handler
+    events:
+      - http:
+          path: incident-reports/{id}
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  incident-reports-delete:
+    handler: src/features/incident-reports/delete/handler.handler
+    events:
+      - http:
+          path: incident-reports/{id}
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Chat Sessions — CRUD
+  # ---------------------------------------------------------------------------
+  chat-sessions-create:
+    handler: src/features/chat-sessions/create/handler.handler
+    events:
+      - http:
+          path: chat-sessions
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  chat-sessions-list:
+    handler: src/features/chat-sessions/list/handler.handler
+    events:
+      - http:
+          path: chat-sessions
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  chat-sessions-get:
+    handler: src/features/chat-sessions/get/handler.handler
+    events:
+      - http:
+          path: chat-sessions/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  chat-sessions-update:
+    handler: src/features/chat-sessions/update/handler.handler
+    events:
+      - http:
+          path: chat-sessions/{id}
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  chat-sessions-delete:
+    handler: src/features/chat-sessions/delete/handler.handler
+    events:
+      - http:
+          path: chat-sessions/{id}
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Messages — CRUD
+  # ---------------------------------------------------------------------------
+  messages-create:
+    handler: src/features/messages/create/handler.handler
+    events:
+      - http:
+          path: messages
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  messages-list:
+    handler: src/features/messages/list/handler.handler
+    events:
+      - http:
+          path: messages/search
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  messages-get:
+    handler: src/features/messages/get/handler.handler
+    events:
+      - http:
+          path: messages/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  messages-update:
+    handler: src/features/messages/update/handler.handler
+    events:
+      - http:
+          path: messages/{id}
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  messages-delete:
+    handler: src/features/messages/delete/handler.handler
+    events:
+      - http:
+          path: messages/{id}
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Notifications — CRUD
+  # ---------------------------------------------------------------------------
+  notifications-create:
+    handler: src/features/notifications/create/handler.handler
+    events:
+      - http:
+          path: notifications
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  notifications-list:
+    handler: src/features/notifications/list/handler.handler
+    events:
+      - http:
+          path: notifications
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  notifications-get:
+    handler: src/features/notifications/get/handler.handler
+    events:
+      - http:
+          path: notifications/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  notifications-update:
+    handler: src/features/notifications/update/handler.handler
+    events:
+      - http:
+          path: notifications/{id}
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  notifications-delete:
+    handler: src/features/notifications/delete/handler.handler
+    events:
+      - http:
+          path: notifications/{id}
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Barangays — CRUD
+  # ---------------------------------------------------------------------------
+  barangays-create:
+    handler: src/features/barangays/create/handler.handler
+    events:
+      - http:
+          path: barangays
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  barangays-list:
+    handler: src/features/barangays/list/handler.handler
+    events:
+      - http:
+          path: barangays
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  barangays-get:
+    handler: src/features/barangays/get/handler.handler
+    events:
+      - http:
+          path: barangays/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  barangays-update:
+    handler: src/features/barangays/update/handler.handler
+    events:
+      - http:
+          path: barangays/{id}
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  barangays-delete:
+    handler: src/features/barangays/delete/handler.handler
+    events:
+      - http:
+          path: barangays/{id}
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
+  # Auth — JWT Authorizer
+  # Use-case: validate the Authorization Bearer token for protected endpoints.
+  # Handler: src/features/auth/authorizer/handler.ts
+  # ---------------------------------------------------------------------------
+  auth-jwt:
+    handler: src/features/auth/authorizer/handler.handler

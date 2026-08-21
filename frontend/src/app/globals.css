@@ -1,0 +1,16 @@
+/* Reset handled by MUI CssBaseline.
+   This file exists only for global custom properties and font declarations. */
+:root {
+  --font-roboto: var(--font-roboto, "Roboto", sans-serif);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

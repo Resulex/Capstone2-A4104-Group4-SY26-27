@@ -1,0 +1,58 @@
+{
+  "name": "kabarangayconnect-backend",
+  "version": "0.1.0",
+  "description": "Serverless backend for KaBarangayConnect — Node.js, TypeScript, AWS Lambda, API Gateway, Mongoose, MongoDB Atlas. Function-per-Use-Case architecture.",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "serverless package",
+    "deploy": "serverless deploy",
+    "offline": "serverless offline start --noTimeout",
+    "lint": "eslint 'src/**/*.ts'",
+    "migrate": "ts-node src/scripts/migrate.ts up",
+    "migrate:up": "ts-node src/scripts/migrate.ts up",
+    "migrate:down": "ts-node src/scripts/migrate.ts down",
+    "migrate:status": "ts-node src/scripts/migrate.ts status",
+    "migrate:create": "ts-node src/scripts/migrate-create.ts",
+    "seed": "ts-node src/scripts/seed.ts",
+    "seed:reset": "ts-node src/scripts/seed.ts --reset"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "serverless",
+    "api-gateway",
+    "mongodb",
+    "mongoose",
+    "typescript",
+    "barangay"
+  ],
+  "dependencies": {
+    "aws-lambda": "^1.0.7",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "google-auth-library": "^11.0.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.5.0",
+    "otplib": "^13.4.1"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.138",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.14.0",
+    "@typescript-eslint/eslint-plugin": "^7.16.0",
+    "@typescript-eslint/parser": "^7.16.0",
+    "eslint": "^8.57.0",
+    "mongodb": "^6.21.0",
+    "serverless": "^3.38.0",
+    "serverless-esbuild": "^1.52.0",
+    "serverless-offline": "^13.3.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
