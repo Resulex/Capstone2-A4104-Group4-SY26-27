@@ -1,0 +1,25 @@
+# AWS Amplify Hosting build spec — KaBarangayConnect (monorepo)
+# The backend is deployed via Serverless Framework (not Amplify Gen 2), so only
+# the Next.js frontend client is built here.
+# Docs: https://docs.aws.amazon.com/amplify/latest/userguide/monorepo-configuration.html
+version: 1
+applications:
+  - appRoot: frontend
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - npm ci
+            - node --version
+        build:
+          commands:
+            - npm run build:amplify
+      artifacts:
+        # Next.js SSR/compute hosting. Amplify inspects the build output and
+        # auto-provisions the compute runtime.
+        baseDirectory: .next
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
