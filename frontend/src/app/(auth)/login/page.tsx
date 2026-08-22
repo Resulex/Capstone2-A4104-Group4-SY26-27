@@ -15,6 +15,7 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import Alert from "@mui/material/Alert";
+import Snackbar from "@mui/material/Snackbar";
 import Image from "next/image";
 import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
@@ -55,13 +56,12 @@ export default function ResidentLoginPage() {
    */
   const handleGoogleMessage = useCallback(
     async (event: MessageEvent) => {
-      // The popup page is served from the backend origin (e.g. :3001), not the
-      // frontend origin, so accept messages from the configured backend too.
-      const backendOrigin =
-        process.env.NEXT_PUBLIC_API_BACKEND_URL ||
-        `http://localhost:${process.env.NEXT_PUBLIC_API_BACKEND_PORT || "3001"}`;
-      const allowedOrigins = [window.location.origin, backendOrigin];
-      if (!allowedOrigins.includes(event.origin)) return;
+      // Only accept messages from the exact popup window we opened. The popup
+      // navigates Google → backend callback, so its origin changes across the
+      // redirect chain; matching on `event.source` (the window object) is the
+      // reliable check instead of an origin allowlist.
+      if (!popupRef.current || event.source !== popupRef.current) return;
+
       const data = event.data as { token?: string; isNewUser?: boolean };
       if (!data || typeof data.token !== "string") return;
 
@@ -104,12 +104,24 @@ export default function ResidentLoginPage() {
         return;
       }
       popupRef.current = popup;
+
+      // If the popup closes without ever delivering a token (e.g. the user
+      // cancelled), surface a failure toast on the login page.
+      const timer = window.setInterval(() => {
+        if (popup.closed) {
+          window.clearInterval(timer);
+          popupRef.current = null;
+          setError("Google sign-in was cancelled. Please try again.");
+          setSubmitting(false);
+        }
+      }, 500);
     } catch (err) {
       setError(
         err instanceof ApiError
           ? err.message
           : "Could not start Google sign-in. Please try again.",
       );
+      setSubmitting(false);
     } finally {
       setSubmitting(false);
     }
@@ -305,6 +317,32 @@ export default function ResidentLoginPage() {
           </Link>
         </Typography>
       </Stack>
+
+      <Snackbar
+        open={!!error}
+        autoHideDuration={6000}
+        onClose={() => setError(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert severity="error" variant="filled" onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      </Snackbar>
+
+      <Snackbar
+        open={!!success}
+        autoHideDuration={4000}
+        onClose={() => setSuccess(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert
+          severity="success"
+          variant="filled"
+          onClose={() => setSuccess(null)}
+        >
+          {success}
+        </Alert>
+      </Snackbar>
     </Paper>
   );
 }

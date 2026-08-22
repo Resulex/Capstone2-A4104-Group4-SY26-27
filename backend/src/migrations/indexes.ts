@@ -8,7 +8,10 @@ type IndexSpec = IndexDescription;
  */
 export const SEEDED_INDEXES: Record<string, IndexSpec[]> = {
   residents: [
-    { name: 'unique_residentId', key: { residentId: 1 }, unique: true },
+    // `sparse: true` so Google-SSO residents (which have no `residentId`)
+    // are not subject to the unique constraint — otherwise only one resident
+    // without a `residentId` could ever be inserted.
+    { name: 'unique_residentId', key: { residentId: 1 }, unique: true, sparse: true },
     { name: 'unique_emailAddress', key: { emailAddress: 1 }, unique: true },
     { name: 'idx_residents_barangay', key: { barangay: 1 } },
     { name: 'idx_residents_name', key: { lastName: 1, firstName: 1 } },

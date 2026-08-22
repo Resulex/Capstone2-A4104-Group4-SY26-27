@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
-import { unauthorizedError, conflictError } from '../../../shared/errors';
+import { unauthorizedError } from '../../../shared/errors';
 import { Resident } from '../../../models';
 import { signToken } from '../../../shared/auth';
 import { buildGoogleAuthUrl, exchangeCodeForTokens, verifyGoogleIdToken } from '../../../shared/google';
@@ -71,43 +71,50 @@ export async function googleLoginCallback(
 
   await connectToDatabase();
 
+  // Normalize the email so lookups match regardless of how Google (or a
+  // previously-seeded record) capitalized the address.
+  const email = profile.email.toLowerCase();
+  const escapedEmail = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
   // 1) Returning resident — match by the stable Google `sub`.
   let resident = await Resident.findOne({ googleSub: profile.sub });
 
   // 2) Existing resident created by an admin but not yet linked to Google —
-  //    link by verified email if a match exists and no other Google account
-  //    has claimed that email.
+  //    link by verified email (case-insensitive) if a match exists and no
+  //    other Google account has claimed that email.
   if (!resident) {
-    resident = await Resident.findOne({ emailAddress: profile.email });
+    resident = await Resident.findOne({
+      emailAddress: { $regex: `^${escapedEmail}$`, $options: 'i' },
+    });
   }
 
-  let isNewResident = false;
-  if (!resident) {
-    // 3) First-time login — provision a minimal record. The resident completes
-    //    the remaining PII (barangay, address, contact) during onboarding.
-    resident = await Resident.create({
-      firstName: profile.firstName,
-      lastName: profile.lastName,
-      emailAddress: profile.email,
-      googleSub: profile.sub,
-      googleEmail: profile.email,
-      profileImageUrl: profile.picture,
-      accountStatus: 'active',
-      isProvisioned: false,
-    }).catch(() => null);
+  let isNewResident = !resident;
 
-    if (!resident) {
-      // Likely a unique-constraint race (email taken). Re-check.
-      throw conflictError('An account with this email already exists. Please sign in another way.');
-    }
-    isNewResident = true;
-  } else {
-    // Link the Google account if it was matched by email.
-    if (!resident.googleSub) {
-      resident.googleSub = profile.sub;
-      resident.googleEmail = profile.email;
-      await resident.save().catch(() => null);
-    }
+  // 3) Provision or link in a single atomic upsert. On first-time login this
+  //    inserts a minimal record (the resident completes the remaining PII —
+  //    barangay, address, contact — during onboarding). On any duplicate/race
+  //    it returns the already-existing record instead of throwing a 409.
+  resident = await Resident.findOneAndUpdate(
+    { $or: [{ googleSub: profile.sub }, { emailAddress: { $regex: `^${escapedEmail}$`, $options: 'i' } }] },
+    {
+      $setOnInsert: {
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        emailAddress: email,
+        accountStatus: 'active',
+        isProvisioned: false,
+      },
+      $set: {
+        googleSub: profile.sub,
+        googleEmail: email,
+        ...(profile.picture ? { profileImageUrl: profile.picture } : {}),
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  if (!resident) {
+    throw unauthorizedError('Could not provision or locate your account.');
   }
 
   if (resident.accountStatus !== 'active') {
