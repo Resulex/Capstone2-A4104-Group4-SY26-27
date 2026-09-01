@@ -1,7 +1,10 @@
 # KaBarangayConnect
 
+**An Integrated Web-Based Management and Real-Time Incident Reporting System**
+
 A platform connecting barangay residents, local officials, and services —
-from announcements and incident reports to document requests and chat.
+from announcements and incident reports to document requests and chat —
+enabling streamlined administrative management and real-time incident reporting.
 
 This repository is a monorepo containing two independent applications:
 
@@ -46,18 +49,41 @@ full instructions:
 ### Quick start
 
 ```bash
-# Backend (serverless offline, http://localhost:3001)
+# Backend (serverless offline, http://localhost:3000)
 cd backend
 npm install
 cp .env.example .env   # then fill in MONGODB_URI, JWT_SECRET, etc.
 npm run offline
 
-# Frontend (Next.js dev server, http://localhost:3000)
+# Frontend (Next.js dev server, http://localhost:8000)
 cd frontend
 npm install
 cp .env.example .env   # then fill in API_BACKEND_URL, etc.
 npm run dev
 ```
+
+### Accessing the application
+
+Once both servers are running, open the frontend in your browser:
+
+| User   | URL                                    |
+| ------ | -------------------------------------- |
+| Resident | http://localhost:8000/login          |
+| Admin  | http://localhost:8000/admin/login      |
+
+### Sample credentials (for testing)
+
+Seeded test accounts (see `backend/src/scripts/seed-data.ts`):
+
+| Role          | Username   | Password       | Notes                                      |
+| ------------- | ---------- | -------------- | ------------------------------------------ |
+| Admin         | `r.cruz`   | `admin1`    | Full admin access                          |
+| Moderator     | `m.reyes`  | `admin1 | Manage content / moderate reports        |
+| Content Admin | `j.bautista` | `admin1` | Publish announcements & content          |
+
+> **Note:** MFA is not pre-enrolled for seeded accounts. On first admin login
+> you'll be prompted to enroll a TOTP authenticator (e.g. Google Authenticator)
+> before you can complete the sign-in.
 
 ## Environment Variables
 

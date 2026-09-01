@@ -2,9 +2,9 @@ import type { NextConfig } from "next";
 
 /**
  * Base URL of the serverless backend. Override via the API_BACKEND_URL env
- * var; with `serverless offline` it runs on http://localhost:3001.
+ * var; with `serverless offline` it runs on http://localhost:3000.
  */
-const API_BACKEND_URL = process.env.API_BACKEND_URL ?? "http://localhost:3001";
+const API_BACKEND_URL = process.env.API_BACKEND_URL ?? "http://localhost:3000";
 
 /**
  * Stage prefix used by `serverless offline` (e.g. `/dev`). Override via the
@@ -23,6 +23,13 @@ const API_WEBSOCKET_URL = process.env.API_WEBSOCKET_URL ?? "ws://localhost:3002"
 void API_WEBSOCKET_URL;
 
 const nextConfig: NextConfig = {
+  images: {
+    remotePatterns: [
+      // Allow remote media (S3 uploads, Google profile images) through the
+      // image optimizer; content is admin-curated barangay media.
+      { protocol: "https", hostname: "**" },
+    ],
+  },
   async rewrites() {
     return [
       // Proxy the backend auth routes so the frontend can call relative

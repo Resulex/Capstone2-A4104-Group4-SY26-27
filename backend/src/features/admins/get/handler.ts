@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parsePathParam } from '../../../shared/handler';
+import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { Admin } from '../../../models';
@@ -21,9 +21,9 @@ export async function getAdmin(
   const id = parsePathParam(event, 'id');
   await connectToDatabase();
 
-  const admin = await Admin.findOne({
-    $or: [{ _id: id }, { adminId: id }],
-  }).select('+passwordHash');
+  const admin = await Admin.findOne(
+    buildIdOrCustomIdQuery(id, 'adminId')
+  ).select('+passwordHash');
 
   if (!admin) {
     throw notFoundError('Admin not found.');

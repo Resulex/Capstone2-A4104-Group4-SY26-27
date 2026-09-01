@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parseBody, parsePathParam } from '../../../shared/handler';
+import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { Announcement } from '../../../models';
@@ -30,9 +30,7 @@ export async function updateAnnouncement(
   const id = parsePathParam(event, 'id');
   await connectToDatabase();
 
-  const announcement = await Announcement.findOne({
-    $or: [{ _id: id }, { announcementId: id }],
-  });
+  const announcement = await Announcement.findOne(buildIdOrCustomIdQuery(id, 'announcementId'));
   if (!announcement) {
     throw notFoundError('Announcement not found.');
   }

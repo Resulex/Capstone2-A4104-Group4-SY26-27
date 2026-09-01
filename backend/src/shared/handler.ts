@@ -3,6 +3,7 @@ import type {
   APIGatewayProxyResult,
   Context,
 } from 'aws-lambda';
+import mongoose from 'mongoose';
 import { AppError } from './errors';
 import { serverError } from './responses';
 
@@ -76,4 +77,19 @@ export function parsePathParam(event: APIGatewayProxyEvent, name: string): strin
     throw new AppError(400, `Path parameter "${name}" is required.`);
   }
   return decodeURIComponent(value);
+}
+
+/**
+ * Builds a "match by `_id` OR a custom identifier field" query that never
+ * casts an invalid ObjectId. Custom ids such as `ann-001` would otherwise make
+ * Mongoose throw a CastError when it tries to cast `_id` (surfacing as a 500
+ * instead of a clean match/404).
+ */
+export function buildIdOrCustomIdQuery(
+  id: string,
+  customIdField: string
+): Record<string, unknown> {
+  return mongoose.isValidObjectId(id)
+    ? { $or: [{ _id: id }, { [customIdField]: id }] }
+    : { [customIdField]: id };
 }

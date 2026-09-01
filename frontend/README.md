@@ -1,3 +1,7 @@
+# KaBarangayConnect — Frontend
+
+**An Integrated Web-Based Management and Real-Time Incident Reporting System**
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
@@ -21,7 +25,7 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 ## Authentication
 
 The frontend authenticates against the **KaBarangayConnect** serverless backend
-(`serverless offline` → `http://localhost:3001`).
+(`serverless offline` → `http://localhost:3000`).
 
 The backend routes are proxied behind relative `/api/...` paths via the
 `rewrites()` in `next.config.ts` (no CORS configuration required):
@@ -35,7 +39,7 @@ Copy `.env.example` to `.env` and adjust as needed:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `API_BACKEND_URL` | `http://localhost:3001` | Base URL of the REST backend |
+| `API_BACKEND_URL` | `http://localhost:3000` | Base URL of the REST backend |
 | `API_BACKEND_STAGE` | `dev` | Stage prefix used by `serverless offline` |
 | `API_WEBSOCKET_URL` | `ws://localhost:3002` | Base URL of the WebSocket server |
 

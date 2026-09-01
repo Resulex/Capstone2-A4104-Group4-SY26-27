@@ -55,6 +55,65 @@ export async function fetchJson<T>(
 }
 
 /**
+ * Fetch data from a backend business endpoint through the Next.js proxy route
+ * (`/api/backend/...`), which forwards the httpOnly `kbc_token` cookie as an
+ * `Authorization: Bearer` header. The backend wraps success responses in a
+ * `{ success, data, message }` envelope, so the `data` field is unwrapped.
+ */
+export async function getApi<T>(path: string): Promise<T> {
+  const normalized = path.startsWith("/") ? path.slice(1) : path;
+  const envelope = await fetchJson<{ success: boolean; data?: T }>(
+    `/api/backend/${normalized}`,
+  );
+  return envelope?.data as T;
+}
+
+/**
+ * Update a backend resource through the proxy route via PATCH.
+ * Returns the unwrapped `data` from the `{ success, data, message }` envelope.
+ */
+export async function patchApi<T>(path: string, body: unknown): Promise<T> {
+  const normalized = path.startsWith("/") ? path.slice(1) : path;
+  const envelope = await fetchJson<{ success: boolean; data?: T }>(
+    `/api/backend/${normalized}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    },
+  );
+  return envelope?.data as T;
+}
+
+/**
+ * Create a backend resource through the proxy route via POST.
+ * Returns the unwrapped `data` from the `{ success, data, message }` envelope.
+ */
+export async function postApi<T>(path: string, body: unknown): Promise<T> {
+  const normalized = path.startsWith("/") ? path.slice(1) : path;
+  const envelope = await fetchJson<{ success: boolean; data?: T }>(
+    `/api/backend/${normalized}`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+  return envelope?.data as T;
+}
+
+/**
+ * Delete a backend resource through the proxy route via DELETE.
+ * Returns the unwrapped `data` from the `{ success, data, message }` envelope.
+ */
+export async function deleteApi<T>(path: string): Promise<T> {
+  const normalized = path.startsWith("/") ? path.slice(1) : path;
+  const envelope = await fetchJson<{ success: boolean; data?: T }>(
+    `/api/backend/${normalized}`,
+    { method: "DELETE" },
+  );
+  return envelope?.data as T;
+}
+
+/**
  * Extract a JWT from a login/setup response body, tolerating common key
  * names so the frontend is resilient to backend response shapes.
  */

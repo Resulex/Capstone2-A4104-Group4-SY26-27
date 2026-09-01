@@ -8,6 +8,7 @@ import {
   getAuthContext,
   assertOwnResidentRef,
 } from '../../../shared/authorization';
+import { ensureResidentForUser } from '../../../shared/residents';
 
 interface CreateDocumentRequestBody {
   requestId?: string;
@@ -31,16 +32,23 @@ export async function createDocumentRequest(
   const auth = getAuthContext(event);
   const body = parseBody(event) as CreateDocumentRequestBody;
 
-  const { requestId, residentId, documentType, purpose, expectedCompletionDate } = body;
+  const { requestId, documentType, purpose, expectedCompletionDate } = body;
 
-  if (!requestId || !residentId || !documentType || !purpose || !expectedCompletionDate) {
+  // The request owner is derived from the authenticated caller for residents —
+  // their JWT `sub` is their Resident `_id`, so the client never needs to send
+  // a `residentId`. Staff/admin may still supply an explicit `residentId` to
+  // create a request on a resident's behalf.
+  const effectiveResidentId =
+    auth.role === 'resident' ? auth.userId : body.residentId;
+
+  if (!requestId || !effectiveResidentId || !documentType || !purpose || !expectedCompletionDate) {
     return badRequest(
       'requestId, residentId, documentType, purpose, and expectedCompletionDate are required.'
     );
   }
 
-  // Residents may only create requests for themselves.
-  assertOwnResidentRef(auth, residentId);
+  // Defense-in-depth: residents can only create requests for themselves.
+  assertOwnResidentRef(auth, effectiveResidentId);
 
   await connectToDatabase();
 
@@ -49,9 +57,14 @@ export async function createDocumentRequest(
     throw conflictError('A document request with this requestId already exists.');
   }
 
-  const resident = await Resident.findOne({
-    $or: [{ _id: residentId }, { residentId }],
-  });
+  // A resident caller always has a Resident (auto-provisioned if missing);
+  // staff/admin must supply a valid residentId.
+  const resident =
+    auth.role === 'resident'
+      ? await ensureResidentForUser(effectiveResidentId)
+      : await Resident.findOne({
+          $or: [{ _id: effectiveResidentId }, { residentId: effectiveResidentId }],
+        });
   if (!resident) {
     throw badRequestError('Invalid residentId.');
   }

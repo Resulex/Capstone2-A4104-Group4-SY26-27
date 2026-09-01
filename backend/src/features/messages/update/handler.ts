@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parseBody, parsePathParam } from '../../../shared/handler';
+import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { Message, ChatSession, Admin } from '../../../models';
@@ -21,9 +21,7 @@ export async function updateMessage(
 
   await connectToDatabase();
 
-  const message = await Message.findOne({
-    $or: [{ _id: id }, { messageId: id }],
-  });
+  const message = await Message.findOne(buildIdOrCustomIdQuery(id, 'messageId'));
   if (!message) {
     throw notFoundError('Message not found.');
   }

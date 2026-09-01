@@ -5,6 +5,14 @@ export interface IUser extends Document {
   lastName: string;
   email: string;
   phone?: string;
+  middleName?: string;
+  suffix?: string;
+  contactNumber?: string;
+  houseUnitNumber?: string;
+  streetPurokName?: string;
+  city?: string;
+  province?: string;
+  zipCode?: string;
   passwordHash: string;
   role: 'resident' | 'official' | 'admin';
   barangay: mongoose.Types.ObjectId;
@@ -27,6 +35,14 @@ const userSchema = new Schema<IUser>(
       index: true,
     },
     phone: { type: String, trim: true },
+    middleName: { type: String, trim: true },
+    suffix: { type: String, trim: true },
+    contactNumber: { type: String, trim: true },
+    houseUnitNumber: { type: String, trim: true },
+    streetPurokName: { type: String, trim: true },
+    city: { type: String, trim: true },
+    province: { type: String, trim: true },
+    zipCode: { type: String, trim: true },
     passwordHash: { type: String, required: true, select: false },
     role: {
       type: String,

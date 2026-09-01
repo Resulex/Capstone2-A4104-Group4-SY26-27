@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parsePathParam } from '../../../shared/handler';
+import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { DocumentRequest } from '../../../models';
@@ -24,9 +24,7 @@ export async function deleteDocumentRequest(
 
   await connectToDatabase();
 
-  const request = await DocumentRequest.findOne({
-    $or: [{ _id: id }, { requestId: id }],
-  });
+  const request = await DocumentRequest.findOne(buildIdOrCustomIdQuery(id, 'requestId'));
   if (!request) {
     throw notFoundError('Document request not found.');
   }

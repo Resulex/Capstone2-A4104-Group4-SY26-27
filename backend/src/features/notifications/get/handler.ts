@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parsePathParam } from '../../../shared/handler';
+import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { Notification } from '../../../models';
@@ -21,9 +21,9 @@ export async function getNotification(
 
   await connectToDatabase();
 
-  const notification = await Notification.findOne({
-    $or: [{ _id: id }, { notificationId: id }],
-  });
+  const notification = await Notification.findOne(
+    buildIdOrCustomIdQuery(id, 'notificationId')
+  );
   if (!notification) {
     throw notFoundError('Notification not found.');
   }

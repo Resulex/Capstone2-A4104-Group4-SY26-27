@@ -1,5 +1,7 @@
 # KaBarangayConnect — Backend
 
+**An Integrated Web-Based Management and Real-Time Incident Reporting System**
+
 Serverless backend for **KaBarangayConnect**, a platform connecting residents,
 local officials, and services within a barangay.
 
