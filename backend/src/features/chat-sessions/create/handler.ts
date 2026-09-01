@@ -4,7 +4,11 @@ import { withErrorHandling, parseBody } from '../../../shared/handler';
 import { created, badRequest } from '../../../shared/responses';
 import { conflictError, badRequestError } from '../../../shared/errors';
 import { ChatSession, IncidentReport, Resident, Admin } from '../../../models';
-import { getAuthContext, assertOwnResidentRef } from '../../../shared/authorization';
+import {
+  getAuthContext,
+  assertOwnResidentRef,
+  requireStaffOrAdmin,
+} from '../../../shared/authorization';
 
 interface CreateChatSessionBody {
   sessionId?: string;
@@ -17,8 +21,9 @@ interface CreateChatSessionBody {
 
 /**
  * Chat Sessions — Create
- * Use-case: create a chat session for an incident. Residents create sessions
- * for their own incidents; admins create sessions as responders.
+ * Use-case: create a chat session for an incident. Only staff/admins may open
+ * a conversation (responder-initiated); residents cannot initiate a live chat
+ * but can join and message within sessions opened for them.
  * POST /chat-sessions (authenticated)
  */
 export async function createChatSession(
@@ -26,6 +31,10 @@ export async function createChatSession(
   _context: Context
 ): Promise<APIGatewayProxyResult> {
   const auth = getAuthContext(event);
+
+  // Responder-initiated only: residents are not allowed to open sessions.
+  requireStaffOrAdmin(auth);
+
   const body = parseBody(event) as CreateChatSessionBody;
 
   const { sessionId, incidentId, residentId, adminId, deviceInfo, ipAddress } = body;
@@ -36,7 +45,7 @@ export async function createChatSession(
     );
   }
 
-  // Residents may only create sessions for themselves.
+  // Defense-in-depth: residents may only create sessions for themselves.
   assertOwnResidentRef(auth, residentId);
 
   await connectToDatabase();

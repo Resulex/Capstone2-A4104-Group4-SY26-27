@@ -21,11 +21,14 @@ import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
 import GoogleIcon from "@mui/icons-material/Google";
 import { useAuth } from "@/context/AuthContext";
-import { ApiError, fetchJson } from "@/lib/api";
+import { useResident } from "@/context/ResidentContext";
+import { ResidentProfile } from "@/lib/resident";
+import { ApiError, fetchJson, getJwt, postApi } from "@/lib/api";
 
 export default function ResidentLoginPage() {
   const router = useRouter();
   const { setToken } = useAuth();
+  const { setProfile } = useResident();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -35,7 +38,16 @@ export default function ResidentLoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const popupRef = useRef<Window | null>(null);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  // If the user just created an account via /signup, welcome them back with a
+  // success message (query param `/login?registered=1`).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("registered") === "1") {
+      setSuccess("Account created successfully! You can now log in.");
+    }
+  }, []);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
 
@@ -46,8 +58,48 @@ export default function ResidentLoginPage() {
       return;
     }
 
-    // Resident logins are handled via Google SSO on this portal.
-    setError("Please use the “Continue with Google” option to sign in.");
+    if (!identifier.trim() || !password) {
+      setError("Please enter your email address or mobile number and password.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const data = await postApi<{
+        token?: string;
+        user?: {
+          role?: string;
+          firstName?: string;
+          lastName?: string;
+          _id?: string;
+        };
+        resident?: ResidentProfile;
+      }>("/auth/login", { email: identifier.trim(), password });
+
+      const token = getJwt(data) ?? data.token;
+      if (!token) {
+        throw new ApiError(
+          0,
+          "Login succeeded but no session token was returned.",
+        );
+      }
+
+      const role = data.user?.role === "admin" ? "admin" : "resident";
+      await setToken(token, role);
+      // Prefer the linked resident profile; fall back to the user payload.
+      if (data.resident) setProfile(data.resident);
+      else if (data.user) setProfile(data.user as unknown as ResidentProfile);
+      setSuccess("Signed in successfully. Redirecting…");
+      router.push(role === "admin" ? "/admin" : "/");
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Login failed. Please check your credentials and try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   /**
@@ -62,12 +114,19 @@ export default function ResidentLoginPage() {
       // reliable check instead of an origin allowlist.
       if (!popupRef.current || event.source !== popupRef.current) return;
 
-      const data = event.data as { token?: string; isNewUser?: boolean };
+      const data = event.data as {
+        token?: string;
+        user?: ResidentProfile;
+        isNewUser?: boolean;
+      };
       if (!data || typeof data.token !== "string") return;
 
       setSubmitting(true);
       try {
         await setToken(data.token, "resident");
+        // Persist the resident profile returned by the SSO callback so the
+        // resident shell (sidebar avatar, header) can display it across reloads.
+        if (data.user) setProfile(data.user);
         setSuccess("Signed in successfully. Redirecting…");
         router.push("/");
       } catch (err) {
@@ -80,7 +139,7 @@ export default function ResidentLoginPage() {
         setSubmitting(false);
       }
     },
-    [router, setToken],
+    [router, setToken, setProfile],
   );
 
   useEffect(() => {
@@ -140,8 +199,8 @@ export default function ResidentLoginPage() {
         <Stack spacing={1.5} alignItems="center" textAlign="center">
           <Box
             sx={{
-              width: 96,
-              height: 96,
+              width: 120,
+              height: 120,
               position: "relative",
             }}
             aria-label="KaBarangayConnect logo"
@@ -151,7 +210,7 @@ export default function ResidentLoginPage() {
               alt="KaBarangayConnect logo"
               fill
               priority
-              sizes="96px"
+              sizes="120px"
               style={{ objectFit: "contain" }}
             />
           </Box>

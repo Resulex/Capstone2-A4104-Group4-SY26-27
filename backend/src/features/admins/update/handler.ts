@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parseBody, parsePathParam } from '../../../shared/handler';
+import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { hashPassword } from '../../../shared/password';
@@ -33,9 +33,7 @@ export async function updateAdmin(
 
   await connectToDatabase();
 
-  const admin = await Admin.findOne({
-    $or: [{ _id: id }, { adminId: id }],
-  });
+  const admin = await Admin.findOne(buildIdOrCustomIdQuery(id, 'adminId'));
   if (!admin) {
     throw notFoundError('Admin not found.');
   }

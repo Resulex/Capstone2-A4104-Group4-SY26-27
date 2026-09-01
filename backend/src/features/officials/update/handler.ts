@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parseBody, parsePathParam } from '../../../shared/handler';
+import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { Official } from '../../../models';
@@ -32,9 +32,7 @@ export async function updateOfficial(
   const id = parsePathParam(event, 'id');
   await connectToDatabase();
 
-  const official = await Official.findOne({
-    $or: [{ _id: id }, { officialId: id }],
-  });
+  const official = await Official.findOne(buildIdOrCustomIdQuery(id, 'officialId'));
   if (!official) {
     throw notFoundError('Official not found.');
   }

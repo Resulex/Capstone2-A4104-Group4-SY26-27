@@ -9,15 +9,23 @@ import { createTheme, Theme, ThemeOptions } from "@mui/material/styles";
  * - `"large"`   → +25% base size for low-vision / readability support.
  * - `"xl"`      → +50% base size (extra-large).
  */
-export type FontScale = "default" | "large" | "xl";
+export type FontScale = "small" | "default" | "large" | "xl" | "xxl";
 
-export const FONT_SCALE_OPTIONS: FontScale[] = ["default", "large", "xl"];
+export const FONT_SCALE_OPTIONS: FontScale[] = [
+  "small",
+  "default",
+  "large",
+  "xl",
+  "xxl",
+];
 
 /** Maps each font-scale option to a multiplier applied to the root font size. */
 const FONT_SCALE_MULTIPLIERS: Record<FontScale, number> = {
-  default: 1,
-  large: 1.25,
-  xl: 1.5,
+  small: 0.875, // 14px
+  default: 1,   // 16px
+  large: 1.25,  // 20px
+  xl: 1.5,      // 24px
+  xxl: 2,       // 32px
 };
 
 /** Civic primary palette for the Barangay platform (blue-leaning civic tone). */
@@ -159,6 +167,10 @@ function buildTheme(fontScale: FontScale, highContrast: boolean): Theme {
         styleOverrides: (themeParam) => ({
           html: {
             WebkitTextSizeAdjust: "100%",
+            // MUI's htmlFontSize only affects its internal px→rem math; the
+            // <html> element must actually receive this size so `rem`-based
+            // text scales correctly (larger = bigger, not inverted).
+            fontSize: `${16 * multiplier}px`,
           },
           body: {
             backgroundColor: themeParam.palette.background.default,

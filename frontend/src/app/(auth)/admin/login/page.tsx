@@ -255,8 +255,8 @@ export default function AdminLoginPage() {
         <Stack spacing={1.5} alignItems="center" textAlign="center">
           <Box
             sx={{
-              width: 96,
-              height: 96,
+              width: 120,
+              height: 120,
               position: "relative",
             }}
             aria-label="KaBarangayConnect secure admin logo"
@@ -266,7 +266,7 @@ export default function AdminLoginPage() {
               alt="KaBarangayConnect logo"
               fill
               priority
-              sizes="96px"
+              sizes="120px"
               style={{ objectFit: "contain" }}
             />
           </Box>

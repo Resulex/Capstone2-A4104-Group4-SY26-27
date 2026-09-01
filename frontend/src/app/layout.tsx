@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Roboto } from "next/font/google";
 import { AccessibilityThemeProvider } from "@/context/ThemeContext";
 import { AuthProvider } from "@/context/AuthContext";
+import { ResidentProvider } from "@/context/ResidentContext";
 import ThemeRegistry from "@/theme/ThemeRegistry";
 import "./globals.css";
 
@@ -32,7 +33,9 @@ export default function RootLayout({
       <body>
         <AccessibilityThemeProvider>
           <AuthProvider>
-            <ThemeRegistry>{children}</ThemeRegistry>
+            <ResidentProvider>
+              <ThemeRegistry>{children}</ThemeRegistry>
+            </ResidentProvider>
           </AuthProvider>
         </AccessibilityThemeProvider>
       </body>

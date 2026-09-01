@@ -32,12 +32,22 @@ provider:
     GOOGLE_CLIENT_ID: ${env:GOOGLE_CLIENT_ID, ''}
     GOOGLE_CLIENT_SECRET: ${env:GOOGLE_CLIENT_SECRET, ''}
     GOOGLE_REDIRECT_URI: ${env:GOOGLE_REDIRECT_URI, ''}
+    # Media uploads (S3 presigned URLs — see src/shared/s3.ts)
+    S3_BUCKET_NAME: ${env:S3_BUCKET_NAME, 'kabarangayconnect-media'}
+    S3_BUCKET_REGION: ${env:S3_BUCKET_REGION, 'ap-southeast-1'}
 
-  # IAM role for the Lambda functions. The default role is used here;
-  # extend as needed (e.g. S3, SNS, SES permissions).
+  # IAM role for the Lambda functions. S3 permissions below let the
+  # presign handler sign PUT/GET requests against the media bucket.
   iam:
     role:
-      statements: []
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:DeleteObject
+          Resource:
+            - arn:aws:s3:::${env:S3_BUCKET_NAME, 'kabarangayconnect-media'}/*
 
 plugins:
   - serverless-esbuild
@@ -62,7 +72,7 @@ custom:
     packager: npm
     watch: true
   serverless-offline:
-    port: 3001
+    port: 3000
     reloadHandler: true
 
 functions:
@@ -642,6 +652,28 @@ functions:
             identitySource: method.request.header.Authorization
 
   # ---------------------------------------------------------------------------
+  # Media Uploads — Presign
+  # Use-case: mint a short-lived S3 presigned PUT URL so residents/admins can
+  # upload evidence, verification IDs, banners and profile photos directly to
+  # S3. The client then PUTs the file straight to S3 (bucket CORS must allow
+  # it).
+  # Handler: src/features/uploads/presign/handler.ts
+  # API:     POST /uploads/presign  (authenticated)
+  # ---------------------------------------------------------------------------
+  uploads-presign:
+    handler: src/features/uploads/presign/handler.handler
+    events:
+      - http:
+          path: uploads/presign
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
   # Chat Sessions — CRUD
   # ---------------------------------------------------------------------------
   chat-sessions-create:
@@ -836,6 +868,16 @@ functions:
   # ---------------------------------------------------------------------------
   # Barangays — CRUD
   # ---------------------------------------------------------------------------
+  # Barangays — Public Lookup (for resident sign-up auto-fill)
+  # Handler: src/features/barangays/lookup/handler.ts
+  # API:     GET /barangays/lookup  (public)
+  barangays-lookup:
+    handler: src/features/barangays/lookup/handler.handler
+    events:
+      - http:
+          path: barangays/lookup
+          method: get
+          cors: true
   barangays-create:
     handler: src/features/barangays/create/handler.handler
     events:

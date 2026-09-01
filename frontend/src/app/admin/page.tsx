@@ -3,22 +3,31 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
+import Grid from "@mui/material/Grid";
+import Alert from "@mui/material/Alert";
+import CircularProgress from "@mui/material/CircularProgress";
 import Typography from "@mui/material/Typography";
-import SecurityIcon from "@mui/icons-material/Security";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import DescriptionIcon from "@mui/icons-material/Description";
+import GroupIcon from "@mui/icons-material/Group";
 import { useAuth } from "@/context/AuthContext";
+import { useDashboardData } from "@/context/DashboardDataContext";
+import { TelemetryCard } from "@/components/admin/TelemetryCard";
+import { RecentDocuments } from "@/components/admin/RecentDocuments";
+import { ActiveIncidentsTable } from "@/components/admin/ActiveIncidentsTable";
 
 /**
- * Admin Dashboard (placeholder).
+ * Admin Dashboard.
  *
- * This is the completion target of the admin login flow. It is a minimal
- * guarded page for now; the real dashboard will be built separately.
+ * Renders the three core telemetry panels (Pending Incidents, Pending
+ * Documents, Active Users) plus the Active Incidents table and the Recent
+ * Documents queue. Data is shared from the admin layout's dashboard-data
+ * provider (fetched once from the backend list endpoints).
  */
 export default function AdminPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading, user, logout } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
+  const { dashboardData, isLoading: isLoadingData, error } = useDashboardData();
 
   useEffect(() => {
     if (!isLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -26,47 +35,84 @@ export default function AdminPage() {
     }
   }, [isLoading, isAuthenticated, user, router]);
 
-  if (isLoading) {
+  if (isLoading || !isAuthenticated || user?.role !== "admin") {
     return null;
   }
 
-  if (!isAuthenticated || user?.role !== "admin") {
-    return null;
-  }
-
-  const handleLogout = async () => {
-    await logout();
-    router.replace("/admin/login");
-  };
+  const cards = dashboardData
+    ? [
+        {
+          title: "Pending Incidents",
+          value: dashboardData.pendingIncidents,
+          icon: <WarningAmberIcon />,
+          color: "warning.main",
+        },
+        {
+          title: "Pending Documents",
+          value: dashboardData.pendingDocuments,
+          icon: <DescriptionIcon />,
+          color: "primary.main",
+        },
+        {
+          title: "Active Users",
+          value: dashboardData.activeUsers,
+          icon: <GroupIcon />,
+          color: "secondary.main",
+        },
+      ]
+    : [];
 
   return (
-    <Box
-      sx={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        p: 3,
-      }}
-    >
-      <Paper elevation={3} sx={{ p: { xs: 3, sm: 5 }, borderRadius: 3, maxWidth: 520 }}>
-        <Stack spacing={2} alignItems="center" textAlign="center">
-          <SecurityIcon color="primary" sx={{ fontSize: 56 }} />
-          <Typography variant="h4" component="h1" gutterBottom>
-            Admin Dashboard
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Welcome{user?.name ? `, ${user.name}` : ""}. You are signed in as an
-            administrator.
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            The administrative dashboard is under construction.
-          </Typography>
-          <Button variant="outlined" color="inherit" onClick={handleLogout}>
-            Sign Out
-          </Button>
-        </Stack>
-      </Paper>
+    <Box>
+      <Typography variant="h5" component="h2" gutterBottom>
+        Overview
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Live summary of incidents, document requests, and user activity.
+      </Typography>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
+
+      {isLoadingData ? (
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            minHeight: 200,
+          }}
+        >
+          <CircularProgress aria-label="Loading dashboard data" />
+        </Box>
+      ) : (
+        <Grid container spacing={3}>
+          {cards.map((card) => (
+            <Grid item key={card.title} xs={12} sm={6} md={4}>
+              <TelemetryCard
+                title={card.title}
+                value={card.value}
+                icon={card.icon}
+                color={card.color}
+              />
+            </Grid>
+          ))}
+          <Grid item xs={12} md={8} lg={6}>
+            <RecentDocuments documents={dashboardData?.recentDocuments ?? []} />
+          </Grid>
+
+          <Grid item xs={12} md={8} lg={6}>
+            <ActiveIncidentsTable
+              incidents={dashboardData?.activeIncidents ?? []}
+            />
+          </Grid>
+
+          
+        </Grid>
+      )}
     </Box>
   );
 }

@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parseBody, parsePathParam } from '../../../shared/handler';
+import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError, conflictError } from '../../../shared/errors';
 import { hashPassword } from '../../../shared/password';
@@ -35,9 +35,7 @@ export async function updateResident(
 
   await connectToDatabase();
 
-  const resident = await Resident.findOne({
-    $or: [{ _id: id }, { residentId: id }],
-  });
+  const resident = await Resident.findOne(buildIdOrCustomIdQuery(id, 'residentId'));
   if (!resident) {
     throw notFoundError('Resident not found.');
   }

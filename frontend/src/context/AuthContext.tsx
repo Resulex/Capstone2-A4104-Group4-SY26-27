@@ -68,10 +68,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetchJson<{ authenticated: boolean }>(
-          "/api/auth/me",
-        );
-        if (!cancelled) setIsAuthenticated(res.authenticated);
+        const res = await fetchJson<{
+          authenticated: boolean;
+          role?: string | null;
+        }>("/api/auth/me");
+        if (cancelled) return;
+
+        if (!res.authenticated) {
+          setIsAuthenticated(false);
+          setUser(null);
+          return;
+        }
+
+        const role = res.role === "admin" || res.role === "resident"
+          ? res.role
+          : null;
+        setIsAuthenticated(true);
+        setUser(role ? { role } : null);
       } catch {
         if (!cancelled) setIsAuthenticated(false);
       } finally {

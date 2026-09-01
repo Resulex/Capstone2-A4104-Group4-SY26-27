@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parsePathParam } from '../../../shared/handler';
+import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { Official } from '../../../models';
@@ -21,7 +21,7 @@ export async function getOfficial(
   await connectToDatabase();
 
   const official = await Official.findOne({
-    $or: [{ _id: id }, { officialId: id }],
+    ...buildIdOrCustomIdQuery(id, 'officialId'),
     isDeleted: false,
   });
   if (!official) {

@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parsePathParam } from '../../../shared/handler';
+import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { IncidentReport } from '../../../models';
@@ -23,9 +23,9 @@ export async function getIncidentReport(
 
   await connectToDatabase();
 
-  const report = await IncidentReport.findOne({
-    $or: [{ _id: id }, { incidentId: id }],
-  });
+  const report = await IncidentReport.findOne(
+    buildIdOrCustomIdQuery(id, 'incidentId')
+  );
   if (!report) {
     throw notFoundError('Incident report not found.');
   }
