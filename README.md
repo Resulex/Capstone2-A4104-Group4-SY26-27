@@ -78,8 +78,8 @@ Seeded test accounts (see `backend/src/scripts/seed-data.ts`):
 | Role          | Username   | Password       | Notes                                      |
 | ------------- | ---------- | -------------- | ------------------------------------------ |
 | Admin         | `r.cruz`   | `admin1`    | Full admin access                          |
-| Moderator     | `m.reyes`  | `admin1 | Manage content / moderate reports        |
-| Content Admin | `j.bautista` | `admin1` | Publish announcements & content          |
+| Moderator     | `m.reyes`  | `admin1 | Full admin access       |
+| Content Admin | `j.bautista` | `admin1` | Full admin access          |
 
 > **Note:** MFA is not pre-enrolled for seeded accounts. On first admin login
 > you'll be prompted to enroll a TOTP authenticator (e.g. Google Authenticator)
