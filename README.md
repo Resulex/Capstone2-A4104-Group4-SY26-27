@@ -81,6 +81,7 @@ Seeded test accounts (see `backend/src/scripts/seed-data.ts`):
 | OPERATIONS_CLERK | `m.reyes` | `admin1`    | Incidents & document queues                |
 | INFO_OFFICER  | `j.bautista` | `admin1`   | Announcements / content only               |
 
+
 > **Note:** MFA is not pre-enrolled for seeded accounts. On first admin login
 > you'll be prompted to enroll a TOTP authenticator (e.g. Google Authenticator)
 > before you can complete the sign-in.
