@@ -46,18 +46,21 @@ export default function AdminPage() {
           value: dashboardData.pendingIncidents,
           icon: <WarningAmberIcon />,
           color: "warning.main",
+          href: "/admin/incidents",
         },
         {
           title: "Pending Documents",
           value: dashboardData.pendingDocuments,
           icon: <DescriptionIcon />,
           color: "primary.main",
+          href: "/admin/document-requests",
         },
         {
           title: "Active Users",
           value: dashboardData.activeUsers,
           icon: <GroupIcon />,
           color: "secondary.main",
+          href: "/admin/residents",
         },
       ]
     : [];
@@ -97,16 +100,21 @@ export default function AdminPage() {
                 value={card.value}
                 icon={card.icon}
                 color={card.color}
+                href={card.href}
               />
             </Grid>
           ))}
           <Grid item xs={12} md={8} lg={6}>
-            <RecentDocuments documents={dashboardData?.recentDocuments ?? []} />
+            <RecentDocuments
+              documents={dashboardData?.recentDocuments ?? []}
+              href="/admin/document-requests"
+            />
           </Grid>
 
           <Grid item xs={12} md={8} lg={6}>
             <ActiveIncidentsTable
               incidents={dashboardData?.activeIncidents ?? []}
+              href="/admin/incidents"
             />
           </Grid>
 

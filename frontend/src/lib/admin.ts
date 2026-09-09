@@ -38,9 +38,9 @@ export interface DocumentQueueRecord {
   purpose: string;
   currentStatus: string;
   expectedCompletionDate?: string;
-  paymentStatus?: string;
   dateRequested: string;
   verificationIdUrl?: string;
+  remarks?: string;
 }
 
 /** An incident report record (fields exposed by the list endpoint). */
@@ -194,7 +194,7 @@ export async function updateResident(
 /** Update a document request's status via PATCH. */
 export async function updateDocumentRequest(
   id: string,
-  body: { currentStatus?: string; paymentStatus?: string },
+  body: { currentStatus?: string; remarks?: string },
 ): Promise<DocumentQueueRecord> {
   return patchApi<DocumentQueueRecord>(
     `document-requests/${encodeURIComponent(id)}`,
@@ -289,6 +289,58 @@ export async function fetchNotifications(): Promise<NotificationRecord[]> {
   }
 }
 
+/** Fetch only the caller's own notifications, newest first. */
+export async function fetchMyNotifications(): Promise<NotificationRecord[]> {
+  try {
+    return await getApi<NotificationRecord[]>("notifications/mine");
+  } catch {
+    return [];
+  }
+}
+
+/** Mark all of the caller's notifications as read. */
+export async function markAllNotificationsRead(): Promise<number> {
+  const data = await patchApi<{ updated?: number }>("notifications/read-all", {});
+  return data?.updated ?? 0;
+}
+
+/** Play a short notification chime via the Web Audio API (no asset file). */
+export function playNotificationSound(): void {
+  if (typeof window === "undefined") return;
+  const Ctor =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+  if (!Ctor) return;
+  const ctx = new Ctor();
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(880, now);
+  osc.frequency.setValueAtTime(1174.66, now + 0.12);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.2, now + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.45);
+}
+
+/** Fetch the admin session JWT for authenticating the WebSocket connection. */
+export async function fetchAdminWsToken(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/auth/admin/ws-token", {
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { data?: { token?: string } };
+    return body?.data?.token ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Mark a notification read/unread via PATCH. */
 export async function updateNotification(
   id: string,
@@ -327,6 +379,17 @@ export async function updateChatSession(
   );
 }
 
+/** Create a chat session for an incident (responder-initiated triage). */
+export async function createChatSession(body: {
+  sessionId: string;
+  incidentId: string;
+  residentId: string;
+  deviceInfo: { os: string; browser: string; model?: string };
+  ipAddress: string;
+}): Promise<ChatSessionRecord> {
+  return postApi<ChatSessionRecord>("chat-sessions", body);
+}
+
 /** Load a session's message thread (oldest first) via POST /messages/search. */
 export async function searchMessages(
   sessionId: string,
@@ -363,6 +426,22 @@ export async function updateAdmin(
   body: Partial<AdminRecord> & { password?: string },
 ): Promise<AdminRecord> {
   return patchApi<AdminRecord>(`admins/${encodeURIComponent(id)}`, body);
+}
+
+/** Create a new admin account via POST /admins (top-tier 'Admin' role only). */
+export async function createAdmin(body: {
+  adminId: string;
+  firstName: string;
+  lastName: string;
+  middleName?: string;
+  userName: string;
+  emailAddress: string;
+  password: string;
+  phoneNumber?: string;
+  assignedRole?: "SUPER_ADMIN" | "OPERATIONS_CLERK" | "INFO_OFFICER";
+  accountStatus?: "active" | "suspended" | "deactivated";
+}): Promise<AdminRecord> {
+  return postApi<AdminRecord>("admins", body);
 }
 
 /** Create an announcement via POST. */

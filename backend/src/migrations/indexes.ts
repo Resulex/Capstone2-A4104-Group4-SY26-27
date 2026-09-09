@@ -42,8 +42,6 @@ export const SEEDED_INDEXES: Record<string, IndexSpec[]> = {
     { name: 'idx_docreq_resident', key: { residentId: 1 } },
     { name: 'idx_docreq_status', key: { currentStatus: 1 } },
     { name: 'idx_docreq_type_date', key: { documentType: 1, dateRequested: -1 } },
-    { name: 'idx_docreq_verifiedBy', key: { verifiedBy: 1 } },
-    { name: 'idx_docreq_payment', key: { paymentStatus: 1 } },
   ],
   incidentreports: [
     { name: 'unique_incidentId', key: { incidentId: 1 }, unique: true },

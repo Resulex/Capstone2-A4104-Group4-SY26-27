@@ -23,6 +23,8 @@ export interface IResident extends Document {
   googleSub?: string; // Google account unique identifier
   googleEmail?: string; // verified Google email
   isProvisioned: boolean; // true once the resident completes first-time onboarding
+  termsAcceptedAt?: Date; // set when the resident agrees to Terms + Data Privacy
+  termsVersion?: string; // version of the terms/privacy policy the resident accepted
   createdAt: Date;
   updatedAt: Date;
   toPublicJSON(): Record<string, unknown>;
@@ -72,6 +74,8 @@ const residentSchema = new Schema<IResident>(
     },
     googleEmail: { type: String, lowercase: true, trim: true },
     isProvisioned: { type: Boolean, default: false },
+    termsAcceptedAt: { type: Date },
+    termsVersion: { type: String, trim: true },
   },
   { timestamps: true }
 );

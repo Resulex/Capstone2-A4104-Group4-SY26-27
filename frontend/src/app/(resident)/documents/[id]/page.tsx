@@ -150,6 +150,14 @@ export default function DocumentRequestDetailsPage() {
                   Details
                 </Typography>
                 <DetailRow
+                  label="Request ID"
+                  value={
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {request.requestId}
+                    </Typography>
+                  }
+                />
+                <DetailRow
                   label="Purpose"
                   value={
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
@@ -169,13 +177,6 @@ export default function DocumentRequestDetailsPage() {
                   label="Expected Completion"
                   value={formatDisplayDate(request.expectedCompletionDate)}
                 />
-                <DetailRow
-                  label="Payment Status"
-                  value={<StatusChip status={request.paymentStatus ?? "Unpaid"} />}
-                />
-                {request.officialReceiptNumber && (
-                  <DetailRow label="Official Receipt" value={request.officialReceiptNumber} />
-                )}
 
                 {request.verificationIdUrl && (
                   <>

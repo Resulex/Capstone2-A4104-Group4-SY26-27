@@ -74,15 +74,19 @@ export default function ResidentDashboardPage() {
 
   return (
     <Box>
-      {/* Branding hero (full-bleed on mobile, rounded within padding on desktop). */}
-      <BrandHero
-        residentName={profile?.firstName}
-        phone={BARANGAY_CONTACT.hotline}
-        address={BARANGAY_CONTACT.address}
-      />
+      {/* Branding hero (full-bleed on mobile, rounded within padding on desktop).
+          The shell's `main` now carries the mobile gutter, so a negative margin
+          lets the hero bleed edge-to-edge again on small screens. */}
+      <Box sx={{ mx: { xs: -2 } }}>
+        <BrandHero
+          residentName={profile?.firstName}
+          phone={BARANGAY_CONTACT.hotline}
+          address={BARANGAY_CONTACT.address}
+        />
+      </Box>
 
-      {/* Section padding (main has none on mobile so the hero can bleed edge-to-edge). */}
-      <Box sx={{ px: { xs: 2, sm: 0 }, pb: 3 }}>
+      {/* Remaining sections inherit the gutter from the shell's `main`. */}
+      <Box sx={{ pb: 3 }}>
         {error && (
           <Alert severity="error" sx={{ mt: 2 }}>
             {error}

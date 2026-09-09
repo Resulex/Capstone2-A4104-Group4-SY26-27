@@ -162,6 +162,62 @@ authorizer:
 On success the authorizer emits an allow policy and injects `userId` and `role`
 into `event.requestContext.authorizer`, where protected handlers read them.
 
+### 5a. Admin authentication via AWS Cognito (hybrid, software-token TOTP)
+
+Admin login uses **AWS Cognito User Pools with software-token MFA (TOTP —
+Google Authenticator)** while keeping the Mongo `Admin` record as the profile
++ RBAC source of truth. The app still issues its own HS256 session JWT
+(`signToken`), so the authorizer, protected handlers, and the resident flow
+are unchanged. The pool + app client are created manually in the AWS console
+(`docs/COGNITO_AWS_CONSOLE.md`) and referenced via
+`COGNITO_USER_POOL_ID` / `COGNITO_CLIENT_ID` env vars.
+
+Flow:
+
+1. `POST /auth/admin/login` `{ userName|emailAddress, password }` — Mongo
+   lookup + account-status gate, then Cognito `AdminInitiateAuth`
+   (`ADMIN_USER_PASSWORD_AUTH`). With MFA required in the pool, Cognito
+   returns one of:
+   - `SOFTWARE_TOKEN_MFA` (enrolled) → `{ needsTotp, session }` → step 3.
+   - `MFA_SETUP` (first login) → `{ needsTotpSetup, session }` → step 2.
+2. Enrollment (first login): `POST /auth/admin/login/totp/setup` calls
+   `AssociateSoftwareToken` and returns the QR/`otpauth` URI;
+   `POST /auth/admin/login/totp/verify` calls `VerifySoftwareToken` and sets
+   the software-token MFA preference. The admin signs in again (step 1), which
+   now returns `SOFTWARE_TOKEN_MFA`.
+3. `POST /auth/admin/login/mfa` `{ userName|emailAddress, session, code }` —
+   `AdminRespondToAuthChallenge` (`SOFTWARE_TOKEN_MFA`); the backend maps the
+   Cognito `sub` → Mongo `Admin` (`cognitoSub`) and `signToken` issues the
+   normal session JWT (same httpOnly-cookie flow as before).
+
+The challenge `session` strings are short-lived and round-tripped through the
+client exactly once — the Lambdas stay stateless (no server-side session
+store). Step 1 is **fail-closed**: it never issues a session JWT. If Cognito
+returns tokens without an MFA challenge (i.e. the pool is not enforcing MFA),
+the login returns an error instead of signing the admin in.
+
+Implementation notes:
+
+- Pool configuration (console): email as the username, software-token MFA
+  **required** (`MfaConfiguration` ON), app client with
+  `ALLOW_ADMIN_USER_PASSWORD_AUTH` and no client secret. See
+  `docs/COGNITO_AWS_CONSOLE.md` for the click-path.
+- `src/scripts/provision-cognito-admins.ts` (`npm run provision:cognito`)
+  creates pool users for Mongo admins (permanent password) and stores
+  `cognitoSub` on the `Admin` doc. `POST /admins` provisions new admins
+  automatically; admin create/update/delete stay in sync.
+- MFA is not set up during provisioning — because the pool requires it, each
+  admin enrolls a TOTP authenticator on their first sign-in.
+- The legacy custom otplib TOTP code (`shared/totp.ts`, the `auth/admin/totp/*`
+  endpoints) is deprecated and kept for rollback only.
+- Offline dev: set `COGNITO_OFFLINE=true` to use the in-process stub — no live
+  pool needed. Admins whose Mongo `Admin.mfaEnrolled` flag is not set are sent
+  through the real `MFA_SETUP` flow: the stub issues a genuine random base32
+  secret, so the QR can be scanned with Google Authenticator (real codes, or
+  the logged dev code `123456`, both complete it). Once enrolled
+  (`mfaEnrolled = true`) sign-in returns `SOFTWARE_TOKEN_MFA` (dev code
+  `123456`).
+
 ---
 
 ## 6. API Gateway Mapping

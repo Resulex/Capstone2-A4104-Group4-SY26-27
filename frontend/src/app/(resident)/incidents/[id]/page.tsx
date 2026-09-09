@@ -188,6 +188,13 @@ export default function IncidentDetailsPage() {
                   label="Location Details"
                   value={report.locationDetails}
                 />
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mt: 1.5, fontStyle: "italic" }}
+                >
+                  Please wait for an update from the barangay administration.
+                </Typography>
               </CardContent>
             </Card>
           </Grid>

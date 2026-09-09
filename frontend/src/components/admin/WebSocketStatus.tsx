@@ -3,37 +3,35 @@
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import Tooltip from "@mui/material/Tooltip";
+import CloudDoneIcon from "@mui/icons-material/CloudDone";
 import CloudOffIcon from "@mui/icons-material/CloudOff";
-import type { WebSocketStatus as WebSocketStatusValue } from "@/hooks/useWebSocket";
 
 interface WebSocketStatusProps {
-  /** Current lifecycle state of the WebSocket connection. */
-  status: WebSocketStatusValue;
+  /** True when the browser is online AND the WebSocket is connected. */
+  isOnline: boolean;
 }
 
 /**
- * Non-intrusive WebSocket connection warning.
- *
- * Renders nothing while the connection is healthy (`connected` or still
- * `connecting`), and only surfaces a compact warning when the connection is
- * `disconnected` or has entered an `error` state — reducing cognitive load
- * under normal operation.
+ * Connection status chip: a subdued green "Online" chip while connected, an
+ * amber "Offline" chip otherwise. Keeping the green chip visible when online
+ * (rather than hiding it) gives admins continuous feedback.
  */
-export function WebSocketStatus({ status }: WebSocketStatusProps) {
-  if (status === "connected" || status === "connecting") {
-    return null;
-  }
-
-  const label = status === "error" ? "Live updates unavailable" : "Offline";
-
+export function WebSocketStatus({ isOnline }: WebSocketStatusProps) {
+  const label = isOnline ? "Online" : "Offline";
   return (
-    <Tooltip title="Real-time updates are currently unavailable.">
+    <Tooltip
+      title={
+        isOnline
+          ? "Connected — real-time updates active."
+          : "You are offline — real-time updates paused."
+      }
+    >
       <Box role="status" aria-live="polite">
         <Chip
-          icon={<CloudOffIcon />}
+          icon={isOnline ? <CloudDoneIcon /> : <CloudOffIcon />}
           label={label}
           size="small"
-          color="warning"
+          color={isOnline ? "success" : "warning"}
           variant="outlined"
           aria-label={`Connection status: ${label}`}
         />

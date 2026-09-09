@@ -27,7 +27,7 @@ export async function deleteResident(
 
   // Residents may only delete their own record.
   if (auth.role === 'resident') {
-    assertResidentOwnership(auth, resident.residentId);
+    assertResidentOwnership(auth, resident);
   }
 
   await resident.deleteOne();

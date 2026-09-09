@@ -13,13 +13,14 @@ import Stack from "@mui/material/Stack";
 import Alert from "@mui/material/Alert";
 import Snackbar from "@mui/material/Snackbar";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import { useResident } from "@/context/ResidentContext";
+import { useResidentDashboard } from "@/context/ResidentDashboardContext";
 import { PageHeader } from "@/components/resident/PageHeader";
 import { MediaUploader } from "@/components/shared/MediaUploader";
 import {
   DOCUMENT_PURPOSES,
   DOCUMENT_TYPES,
   createDocumentRequest,
-  newId,
 } from "@/lib/resident";
 
 const PROCESSING_INFO = [
@@ -46,9 +47,17 @@ function defaultCompletionDate(): string {
  */
 export default function NewDocumentRequestPage() {
   const router = useRouter();
+  const { profile } = useResident();
+  const { reload, addDocumentRequestLocal } = useResidentDashboard();
 
   const [documentType, setDocumentType] = useState("");
   const [purpose, setPurpose] = useState("");
+  const [contactNumber, setContactNumber] = useState(
+    () => profile?.contactNumber ?? "",
+  );
+  const [emailAddress, setEmailAddress] = useState(
+    () => profile?.emailAddress ?? "",
+  );
   const [expectedCompletionDate, setExpectedCompletionDate] = useState("");
   const [verificationIdUrl, setVerificationIdUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -59,16 +68,34 @@ export default function NewDocumentRequestPage() {
     event.preventDefault();
     setError(null);
 
+    const contact = contactNumber.trim();
+    const email = emailAddress.trim();
+    if (!contact || !email) {
+      setError(
+        "Contact number and email address are required so the barangay can reach you about this request.",
+      );
+      return;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const created = await createDocumentRequest({
-        requestId: newId(),
         documentType,
         purpose,
+        contactNumber: contact,
+        emailAddress: email,
         expectedCompletionDate:
           expectedCompletionDate || defaultCompletionDate(),
         verificationIdUrl,
       });
+      // Show the new request immediately in the shared list state, then
+      // refetch the dashboard snapshot so other surfaces stay consistent.
+      addDocumentRequestLocal(created);
+      reload();
       setSuccessOpen(true);
       setTimeout(() => {
         router.push(`/documents/${encodeURIComponent(created.requestId)}`);
@@ -132,6 +159,27 @@ export default function NewDocumentRequestPage() {
                   </MenuItem>
                 ))}
               </TextField>
+
+              <TextField
+                label="Contact Number"
+                required
+                fullWidth
+                value={contactNumber}
+                onChange={(e) => setContactNumber(e.target.value)}
+                inputProps={{ "aria-label": "Contact number" }}
+                helperText="Mobile or landline number so the barangay can reach you about this request."
+              />
+
+              <TextField
+                label="Email Address"
+                required
+                type="email"
+                fullWidth
+                value={emailAddress}
+                onChange={(e) => setEmailAddress(e.target.value)}
+                inputProps={{ "aria-label": "Email address" }}
+                helperText="Updates about this request will be sent to this email."
+              />
 
               <TextField
                 label="Expected Completion (optional)"

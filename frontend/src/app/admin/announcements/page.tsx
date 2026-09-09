@@ -6,6 +6,7 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
+import Avatar from "@mui/material/Avatar";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Alert from "@mui/material/Alert";
@@ -310,6 +311,7 @@ export default function AnnouncementsPage() {
               <Table size="medium" aria-label="Announcements">
                 <TableHead>
                   <TableRow>
+                    <TableCell sx={{ fontWeight: 700 }}>Photo</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Title</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>
                       Description
@@ -324,6 +326,16 @@ export default function AnnouncementsPage() {
                 <TableBody>
                   {announcements.map((announcement) => (
                     <TableRow key={announcement.announcementId} hover>
+                      <TableCell>
+                        <Avatar
+                          variant="rounded"
+                          src={announcement.imageUrl}
+                          alt={announcement.titleText}
+                          sx={{ width: 48, height: 48 }}
+                        >
+                          <CampaignIcon />
+                        </Avatar>
+                      </TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>
                         {announcement.titleText}
                       </TableCell>

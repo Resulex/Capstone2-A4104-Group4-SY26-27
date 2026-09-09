@@ -18,7 +18,6 @@ import { MediaUploader } from "@/components/shared/MediaUploader";
 import {
   INCIDENT_CATEGORIES,
   createIncidentReport,
-  newId,
 } from "@/lib/resident";
 
 /**
@@ -48,7 +47,6 @@ export default function NewIncidentReportPage() {
     setSubmitting(true);
     try {
       const created = await createIncidentReport({
-        incidentId: newId(),
         incidentCategory,
         descriptionText,
         locationDetails,

@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parseBody } from '../../../shared/handler';
+import { withErrorHandling, parseBody, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok, badRequest } from '../../../shared/responses';
 import { Message, ChatSession, Admin } from '../../../models';
 import { getAuthContext } from '../../../shared/authorization';
@@ -23,9 +23,9 @@ export async function listMessages(
 
   const query: Record<string, unknown> = {};
   if (body.sessionId) {
-    const session = await ChatSession.findOne({
-      $or: [{ _id: body.sessionId }, { sessionId: body.sessionId }],
-    });
+    const session = await ChatSession.findOne(
+      buildIdOrCustomIdQuery(body.sessionId, 'sessionId')
+    );
     if (!session) {
       return badRequest('Invalid sessionId.');
     }

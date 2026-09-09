@@ -43,6 +43,8 @@ export interface ResidentProfile {
   accountStatus?: string;
   googleEmail?: string;
   isProvisioned?: boolean;
+  termsAcceptedAt?: string;
+  termsVersion?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -59,6 +61,23 @@ export interface ResidentDashboardData {
   incidentReports: IncidentRecord[];
   chatSessions: ChatSessionRecord[];
   officials: OfficialRecord[];
+}
+
+/**
+ * Fetch the resident session JWT (from the httpOnly cookie, via the backend
+ * `auth/resident/ws-token` endpoint) so the resident shell can open an
+ * authenticated WebSocket for real-time notifications.
+ */
+export async function fetchResidentWsToken(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/auth/resident/ws-token", {
+      cache: "no-store",
+    });
+    const body = (await res.json()) as { data?: { token?: string } };
+    return body?.data?.token ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -142,18 +161,34 @@ export async function markNotificationRead(id: string): Promise<NotificationReco
 }
 
 /**
- * Submit a new document request. `requestId` is client-generated (the backend
- * does not mint one); the resident owner is derived from the JWT by the
- * backend, so no `residentId` is required.
+ * Submit a new document request. The backend assigns the sequential id
+ * (REQ-<year><5-digit sequence>); the resident owner is derived from the JWT,
+ * so no `residentId` is required.
  */
 export async function createDocumentRequest(body: {
-  requestId: string;
   documentType: string;
   purpose: string;
+  /** Contact details captured on this request (snapshotted by the backend). */
+  contactNumber?: string;
+  emailAddress?: string;
   expectedCompletionDate?: string;
   verificationIdUrl?: string;
 }): Promise<DocumentQueueRecord> {
   return postApi<DocumentQueueRecord>("document-requests", body);
+}
+
+/** Current version of the Terms + Data Privacy Policy. Bump to force re-consent. */
+export const TERMS_VERSION = "1.0";
+
+/**
+ * Record Terms + Data Privacy consent on the resident's own account. The
+ * backend sets the accepted timestamp server-side; returns the updated profile.
+ */
+export async function acceptResidentTerms(id: string): Promise<ResidentProfile> {
+  return patchApi<ResidentProfile>(`residents/${encodeURIComponent(id)}`, {
+    acceptTerms: true,
+    termsVersion: TERMS_VERSION,
+  });
 }
 
 /**
@@ -161,7 +196,6 @@ export async function createDocumentRequest(body: {
  * resident owner from the JWT, so no `residentId` is required.
  */
 export async function createIncidentReport(body: {
-  incidentId: string;
   incidentCategory: string;
   descriptionText: string;
   locationDetails: string;
@@ -177,9 +211,6 @@ export async function createIncidentReport(body: {
 export interface DocumentRequestDetail extends DocumentQueueRecord {
   residentId?: string;
   timeline?: { step?: string; date?: string; status?: string }[];
-  verifiedBy?: string;
-  verifiedAt?: string;
-  officialReceiptNumber?: string;
 }
 
 /** Fetch a single document request (own record only). */

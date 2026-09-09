@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
@@ -20,6 +20,7 @@ import ForumIcon from "@mui/icons-material/Forum";
 import SendIcon from "@mui/icons-material/Send";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useAuth } from "@/context/AuthContext";
+import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import {
   ChatMessageRecord,
   ChatSessionRecord,
@@ -31,6 +32,7 @@ import {
   searchMessages,
   sendMessage,
   updateChatSession,
+  createChatSession,
 } from "@/lib/admin";
 
 function formatTime(iso?: string): string {
@@ -51,9 +53,13 @@ function formatTime(iso?: string): string {
  */
 export default function ChatSessionsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const incidentParam = searchParams.get("incident");
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
+  const isOnline = useOnlineStatus();
 
   const [sessions, setSessions] = useState<ChatSessionRecord[]>([]);
+  const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
   const [residentNames, setResidentNames] = useState<Map<string, string>>(
     new Map(),
   );
@@ -66,11 +72,14 @@ export default function ChatSessionsPage() {
   const [threadLoading, setThreadLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
 
   const sessionsRef = useRef<ChatSessionRecord[]>([]);
+  // Guards against duplicate auto-creation when arriving from an incident row.
+  const creatingIncidentRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isAuthLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -89,6 +98,7 @@ export default function ChatSessionsPage() {
         ]);
         if (!cancelled) {
           setSessions(sessionData);
+          setIncidents(incidentData);
           setResidentNames(buildResidentMap(residentData));
           setIncidentLabels(buildIncidentMap(incidentData));
         }
@@ -141,6 +151,63 @@ export default function ChatSessionsPage() {
     setSelectedId(session.sessionId);
     void loadMessages(session);
   };
+
+  // When arriving from an incident's "Open Triage Chat", auto-open that
+  // incident's session so the admin drops straight into the thread. Sessions
+  // store the incident's Mongo _id (not the custom INC-… id), so resolve the
+  // incident's _id first. If the incident has no session yet, auto-create one
+  // (responder-initiated triage) and open it.
+  useEffect(() => {
+    if (!incidentParam || isLoading) return;
+
+    const incident = incidents.find((i) => i.incidentId === incidentParam);
+    const incidentKey = incident?._id ?? incidentParam;
+    const match = sessions.find(
+      (s) =>
+        s.incidentId === incidentKey ||
+        String(s.incidentId).endsWith(incidentKey),
+    );
+    if (match) {
+      creatingIncidentRef.current = null;
+      selectSession(match);
+      return;
+    }
+
+    // No session for this incident yet — open one if we can resolve the
+    // reporting resident. Guard against double submissions.
+    if (!incident || !incident.residentId) return;
+    if (creatingIncidentRef.current === incidentParam) return;
+    creatingIncidentRef.current = incidentParam;
+    setActionError(null);
+
+    const deviceInfo = detectDeviceInfo();
+    (async () => {
+      try {
+        const created = await createChatSession({
+          sessionId: `chat-${Date.now()}`,
+          incidentId: incident._id ?? incident.incidentId,
+          residentId: incident.residentId,
+          deviceInfo,
+          ipAddress: "0.0.0.0",
+        });
+        creatingIncidentRef.current = null;
+        setSessions((prev) => [created, ...prev]);
+        setSelectedId(created.sessionId);
+        setMessages([]);
+        setNotice(
+          `Opened a triage chat for ${incident.incidentId} (${created.sessionId}).`,
+        );
+      } catch (err) {
+        creatingIncidentRef.current = null;
+        setActionError(
+          err instanceof Error
+            ? err.message
+            : "Failed to open a chat for this incident.",
+        );
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, incidents, isLoading, incidentParam]);
 
   const handleSend = async () => {
     const session = selectedSession;
@@ -461,7 +528,7 @@ export default function ChatSessionsPage() {
                     <Button
                       variant="contained"
                       endIcon={<SendIcon />}
-                      disabled={sending || !replyText.trim()}
+                      disabled={sending || !replyText.trim() || !isOnline}
                       onClick={() => void handleSend()}
                     >
                       Send
@@ -475,13 +542,62 @@ export default function ChatSessionsPage() {
       </Grid>
 
       <Snackbar
+        open={Boolean(notice)}
+        autoHideDuration={5000}
+        onClose={() => setNotice(null)}
+      >
+        <Alert
+          severity="success"
+          variant="filled"
+          onClose={() => setNotice(null)}
+        >
+          {notice}
+        </Alert>
+      </Snackbar>
+
+      <Snackbar
         open={Boolean(actionError)}
         autoHideDuration={6000}
         onClose={() => setActionError(null)}
-        message={actionError ?? ""}
-      />
+      >
+        <Alert
+          severity="error"
+          variant="filled"
+          onClose={() => setActionError(null)}
+        >
+          {actionError}
+        </Alert>
+      </Snackbar>
     </Box>
   );
+}
+
+/** Lightweight UA-derived device summary for responder-opened sessions. */
+function detectDeviceInfo(): { os: string; browser: string } {
+  const ua = navigator.userAgent || "";
+  const os = /Android/i.test(ua)
+    ? "Android"
+    : /iPhone|iPad|iPod/i.test(ua)
+      ? "iOS"
+      : /Mac/i.test(ua)
+        ? "macOS"
+        : /Windows/i.test(ua)
+          ? "Windows"
+          : /Linux/i.test(ua)
+            ? "Linux"
+            : "Unknown";
+  const browser = /Edg\//i.test(ua)
+    ? "Edge"
+    : /OPR\/|Opera/i.test(ua)
+      ? "Opera"
+      : /Chrome\//i.test(ua)
+        ? "Chrome"
+        : /Firefox\//i.test(ua)
+          ? "Firefox"
+          : /Safari\//i.test(ua)
+            ? "Safari"
+            : "Unknown";
+  return { os, browser };
 }
 
 /** Build a map of resident ObjectId → full name. */

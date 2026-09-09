@@ -237,13 +237,12 @@ export default function OfficialsPage() {
                       {official.contactNumber}
                     </Typography>
                     <Stack
-                      direction="row"
-                      spacing={0.5}
-                      justifyContent="center"
-                      flexWrap="wrap"
+                      direction="column"
+                      spacing={1}
                       sx={{ mt: 2 }}
                     >
                       <Button
+                        fullWidth
                         size="small"
                         variant="outlined"
                         startIcon={<EditIcon />}
@@ -258,6 +257,7 @@ export default function OfficialsPage() {
                         Edit Profile
                       </Button>
                       <Button
+                        fullWidth
                         size="small"
                         variant="outlined"
                         startIcon={<PhotoCameraIcon />}
@@ -266,6 +266,7 @@ export default function OfficialsPage() {
                         Update Photo
                       </Button>
                       <Button
+                        fullWidth
                         size="small"
                         variant="outlined"
                         color="error"

@@ -19,10 +19,6 @@ const STATUS_COLORS: Record<string, "default" | "info" | "success" | "warning" |
   responding: "info",
   resolved: "success",
   closed: "default",
-  // Payment
-  paid: "success",
-  "paid offline": "success",
-  unpaid: "default",
   // Priority
   high: "error",
   critical: "error",

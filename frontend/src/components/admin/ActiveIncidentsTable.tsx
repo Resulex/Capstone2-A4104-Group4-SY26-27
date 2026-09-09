@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Chip from "@mui/material/Chip";
@@ -11,12 +12,15 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
+import { alpha } from "@mui/material/styles";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { IncidentReportRecord } from "@/lib/telemetry";
 
 interface ActiveIncidentsTableProps {
   /** Open incidents (Pending/Responding), newest first. */
   incidents: IncidentReportRecord[];
+  /** Optional route opened when a row is clicked (quick link). */
+  href?: string;
 }
 
 /** Color mapping for triage priority. */
@@ -40,11 +44,25 @@ function statusColor(status: string) {
 
 /**
  * Active Incidents table — lists open incident reports with category,
- * location, priority, status, and reported time.
+ * location, priority, status, and reported time. When `href` is supplied,
+ * each row becomes a clickable quick link to it.
  */
 export function ActiveIncidentsTable({
   incidents,
+  href,
 }: ActiveIncidentsTableProps) {
+  const router = useRouter();
+
+  const openRow = (e: React.KeyboardEvent | React.MouseEvent) => {
+    if (!href) return;
+    if (e.type === "keydown") {
+      const key = (e as React.KeyboardEvent).key;
+      if (key !== "Enter" && key !== " ") return;
+      e.preventDefault();
+    }
+    router.push(href);
+  };
+
   return (
     <Card variant="outlined" sx={{ borderRadius: 3 }}>
       <CardContent sx={{ p: 3 }}>
@@ -72,7 +90,20 @@ export function ActiveIncidentsTable({
               </TableHead>
               <TableBody>
                 {incidents.map((incident) => (
-                  <TableRow key={incident.incidentId} hover>
+                  <TableRow
+                    key={incident.incidentId}
+                    hover
+                    onClick={openRow}
+                    onKeyDown={openRow}
+                    tabIndex={href ? 0 : undefined}
+                    sx={(theme) => ({
+                      cursor: href ? "pointer" : undefined,
+                      // Zebra striping using a light tint of the theme color.
+                      "&:nth-of-type(odd)": {
+                        backgroundColor: alpha(theme.palette.primary.main, 0.08),
+                      },
+                    })}
+                  >
                     <TableCell sx={{ fontWeight: 600 }}>
                       {incident.incidentId}
                     </TableCell>

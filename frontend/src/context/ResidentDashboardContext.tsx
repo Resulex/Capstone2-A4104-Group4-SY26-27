@@ -3,6 +3,7 @@
 import {
   createContext,
   ReactNode,
+  useCallback,
   useContext,
   useEffect,
   useState,
@@ -11,6 +12,7 @@ import {
   ResidentDashboardData,
   fetchResidentDashboardData,
 } from "@/lib/resident";
+import type { DocumentQueueRecord, NotificationRecord } from "@/lib/admin";
 
 interface ResidentDashboardContextValue {
   /** Aggregated resident dashboard data (empty arrays while loading). */
@@ -21,8 +23,12 @@ interface ResidentDashboardContextValue {
   error: string | null;
   /** Re-run the initial fetch (e.g. after submitting a new request). */
   reload: () => void;
+  /** Optimistically prepend a newly created document request to shared state. */
+  addDocumentRequestLocal: (record: DocumentQueueRecord) => void;
   /** Optimistically set a notification's read state in shared state. */
   setNotificationReadLocal: (id: string, isRead: boolean) => void;
+  /** Optimistically prepend a real-time notification to shared state. */
+  addNotificationLocal: (notification: NotificationRecord) => void;
 }
 
 const ResidentDashboardContext = createContext<ResidentDashboardContextValue | null>(
@@ -72,6 +78,18 @@ export function ResidentDashboardProvider({ children }: { children: ReactNode })
     };
   }, [version]);
 
+  const addDocumentRequestLocal = (record: DocumentQueueRecord) => {
+    setData((prev) => {
+      // Avoid duplicating a record that already exists in the snapshot (e.g.
+      // if the refetch in `reload()` has already populated it).
+      const exists = prev.documentRequests.some(
+        (r) => r.requestId === record.requestId,
+      );
+      if (exists) return prev;
+      return { ...prev, documentRequests: [record, ...prev.documentRequests] };
+    });
+  };
+
   const setNotificationReadLocal = (id: string, isRead: boolean) => {
     setData((prev) => ({
       ...prev,
@@ -81,12 +99,27 @@ export function ResidentDashboardProvider({ children }: { children: ReactNode })
     }));
   };
 
+  const addNotificationLocal = useCallback((notification: NotificationRecord) => {
+    setData((prev) => {
+      // Avoid duplicating a notification that already arrived via the poll/WS.
+      const exists = prev.notifications.some(
+        (n) =>
+          n.notificationId === notification.notificationId ||
+          n._id === notification._id,
+      );
+      if (exists) return prev;
+      return { ...prev, notifications: [notification, ...prev.notifications] };
+    });
+  }, []);
+
   const value: ResidentDashboardContextValue = {
     data,
     isLoading,
     error,
     reload: () => setVersion((v) => v + 1),
+    addDocumentRequestLocal,
     setNotificationReadLocal,
+    addNotificationLocal,
   };
 
   return (

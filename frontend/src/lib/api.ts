@@ -28,6 +28,9 @@ export async function fetchJson<T>(
 ): Promise<T> {
   const res = await fetch(path, {
     ...options,
+    // Always revalidate user-scoped data; never serve a cached snapshot for
+    // the resident/admin dashboards (new requests must appear immediately).
+    cache: "no-store",
     headers: {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...options.headers,

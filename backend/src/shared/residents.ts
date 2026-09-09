@@ -1,29 +1,36 @@
 import { User, Resident } from '../models';
 
 /**
- * Ensures a Resident record exists for a resident-role User (the JWT `sub`).
+ * Resolves the Resident that owns a self-service record for the JWT `sub`,
+ * provisioning one on demand when only a User exists.
  *
- * Resident-owned collections reference the Resident by `_id`, and for
- * self-registered residents the Resident shares the User's `_id`. Accounts
- * created via the admin `POST /users` endpoint get a User but no linked
- * Resident, which made self-service creates (incident reports, document
- * requests) fail with `Invalid residentId`. This provisions a minimal
- * Resident (linked by `_id`) on demand so resident users can always file
- * records; it is a no-op when a Resident already exists.
+ * Resident-owned collections reference the Resident by `_id`. Google-SSO and
+ * self-registered residents already have a Resident whose `_id`/`residentId`
+ * is the JWT `sub`, so they are returned as-is. Accounts created via the
+ * admin `POST /users` endpoint get a User but no linked Resident, which made
+ * self-service creates (incident reports, document requests) fail with
+ * `Invalid residentId`; those get a minimal Resident (linked by `_id`)
+ * provisioned on demand.
  *
- * Returns the Resident document, or null when the user is not a resident or
- * cannot be found.
+ * Returns the Resident document, or null when no Resident exists and the user
+ * is not a resident/official (or cannot be found).
  */
 export async function ensureResidentForUser(
   userId: string
 ): Promise<InstanceType<typeof Resident> | null> {
-  const user = await User.findById(userId);
-  if (!user || user.role !== 'resident') return null;
-
+  // Google-SSO and self-registered residents already have a Resident whose
+  // `_id`/`residentId` is the JWT `sub` (they may have no User record), so
+  // return it as-is before falling back to User-based provisioning.
   const existing = await Resident.findOne({
     $or: [{ _id: userId }, { residentId: userId }],
   });
   if (existing) return existing;
+
+  // Admin-created user accounts have a User but no linked Resident. Provision
+  // a minimal Resident (linked by `_id`) so resident/official users can file
+  // self-service records.
+  const user = await User.findById(userId);
+  if (!user || (user.role !== 'resident' && user.role !== 'official')) return null;
 
   // Idempotent upsert so concurrent creates cannot throw a duplicate-key error.
   return Resident.findOneAndUpdate(

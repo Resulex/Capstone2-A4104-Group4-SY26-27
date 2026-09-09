@@ -18,7 +18,7 @@ export interface SeedAdmin {
   userName: string;
   emailAddress: string;
   password: string;
-  assignedRole: 'Admin' | 'Moderator' | 'Content Admin';
+  assignedRole: 'SUPER_ADMIN' | 'OPERATIONS_CLERK' | 'INFO_OFFICER';
   accountStatus: 'active' | 'suspended' | 'deactivated';
   lastLogin?: string;
 }
@@ -63,14 +63,14 @@ export interface SeedAnnouncement {
 
 // One barangay for the whole system (city/province/zip read-only defaults).
 export const BARANGAY: SeedBarangay = {
-  name: 'Purok Sampaguita, Barangay Ibabang Iyam',
-  city: 'Lucena City',
-  province: 'Quezon',
+  name: 'Purok 2, Barangay Labuin',
+  city: 'Pila',
+  province: 'Laguna',
   region: 'CALABARZON',
-  zipCode: '4301',
+  zipCode: '4010',
 };
 
-// Admins: keys are used to reference authorId / verifiedBy.
+// Admins: keys are used to reference authorId.
 export const ADMINS: SeedAdmin[] = [
   {
     adminId: 'adm-001',
@@ -80,7 +80,7 @@ export const ADMINS: SeedAdmin[] = [
     userName: 'r.cruz',
     emailAddress: 'ricardo.delacruz@kabarangayconnect.gov.ph',
     password: 'Admin@123',
-    assignedRole: 'Admin',
+    assignedRole: 'SUPER_ADMIN',
     accountStatus: 'active',
     lastLogin: '2026-07-28T09:15:00Z',
   },
@@ -92,7 +92,7 @@ export const ADMINS: SeedAdmin[] = [
     userName: 'm.reyes',
     emailAddress: 'maria.reyes@kabarangayconnect.gov.ph',
     password: 'Moderator@123',
-    assignedRole: 'Moderator',
+    assignedRole: 'OPERATIONS_CLERK',
     accountStatus: 'active',
     lastLogin: '2026-08-10T14:30:00Z',
   },
@@ -104,7 +104,7 @@ export const ADMINS: SeedAdmin[] = [
     userName: 'j.bautista',
     emailAddress: 'jose.bautista@kabarangayconnect.gov.ph',
     password: 'Content@123',
-    assignedRole: 'Content Admin',
+    assignedRole: 'INFO_OFFICER',
     accountStatus: 'active',
     lastLogin: '2026-07-15T11:20:00Z',
   },
@@ -116,7 +116,7 @@ export const ADMINS: SeedAdmin[] = [
     userName: 'a.gonzales',
     emailAddress: 'anna.gonzales@kabarangayconnect.gov.ph',
     password: 'Suspended@123',
-    assignedRole: 'Moderator',
+    assignedRole: 'OPERATIONS_CLERK',
     accountStatus: 'suspended',
     lastLogin: '2026-06-20T08:45:00Z',
   },
@@ -129,7 +129,7 @@ export const OFFICIALS: SeedOfficial[] = [
     designatedPosition: 'Barangay Captain',
     contactNumber: '+639171234500',
     emailAddress: 'captain.villanueva@kabarangayconnect.gov.ph',
-    officeLocation: 'Barangay Hall, Brgy. Ibabang Iyam, Lucena City',
+    officeLocation: 'Barangay Hall, Brgy. Labuin, Pila, Laguna',
     coreResponsibilities: [
       'Preside and manage the barangay assembly sessions',
       'Approve and sign official barangay documents and permits',
@@ -144,7 +144,7 @@ export const OFFICIALS: SeedOfficial[] = [
     designatedPosition: 'Councilor - Peace & Order',
     contactNumber: '+639172345501',
     emailAddress: 'kagawad.mercado@kabarangayconnect.gov.ph',
-    officeLocation: 'Barangay Hall, Brgy. Ibabang Iyam, Lucena City',
+    officeLocation: 'Barangay Hall, Brgy. Labuin, Pila, Laguna',
     coreResponsibilities: [
       'Lead the public safety committee and peace and order planning',
       'Coordinate with the barangay tanod and local police for patrols',
@@ -158,7 +158,7 @@ export const OFFICIALS: SeedOfficial[] = [
     designatedPosition: 'Councilor - Health & Sanitation',
     contactNumber: '+639173345502',
     emailAddress: 'kagawad.agustin@kabarangayconnect.gov.ph',
-    officeLocation: 'Barangay Health Station, Brgy. Ibabang Iyam, Lucena City',
+    officeLocation: 'Barangay Health Station, Brgy. Labuin, Pila, Laguna',
     coreResponsibilities: [
       'Supervise the barangay health station and immunization drives',
       'Organize cleanliness drives and waste segregation programs',
@@ -172,7 +172,7 @@ export const OFFICIALS: SeedOfficial[] = [
     designatedPosition: 'Barangay Secretary',
     contactNumber: '+639174345503',
     emailAddress: 'secretary.palacio@kabarangayconnect.gov.ph',
-    officeLocation: 'Barangay Hall, Brgy. Ibabang Iyam, Lucena City',
+    officeLocation: 'Barangay Hall, Brgy. Labuin, Pila, Laguna',
     coreResponsibilities: [
       'Maintain official records, minutes, and document requests',
       'Process civil registrations and barangay certification requests',
@@ -186,7 +186,7 @@ export const OFFICIALS: SeedOfficial[] = [
     designatedPosition: 'Barangay Treasurer',
     contactNumber: '+639175345504',
     emailAddress: 'treasurer.alonzo@kabarangayconnect.gov.ph',
-    officeLocation: 'Barangay Hall, Brgy. Ibabang Iyam, Lucena City',
+    officeLocation: 'Barangay Hall, Brgy. Labuin, Pila, Laguna',
     coreResponsibilities: [
       'Record and manage barangay income and disbursements',
       'Issue official receipts for payments and fees',
@@ -200,7 +200,7 @@ export const OFFICIALS: SeedOfficial[] = [
     designatedPosition: 'Councilor - Infrastructure',
     contactNumber: '+639176345505',
     emailAddress: 'kagawad.villar@kabarangayconnect.gov.ph',
-    officeLocation: 'Barangay Hall, Brgy. Ibabang Iyam, Lucena City',
+    officeLocation: 'Barangay Hall, Brgy. Labuin, Pila, Laguna',
     coreResponsibilities: [
       'Monitor road, drainage, and public facility maintenance',
       'Prioritize infrastructure repair requests from residents',
@@ -417,7 +417,7 @@ export interface SeedIncident {
 
 export const INCIDENTS: SeedIncident[] = [
   {
-    incidentId: 'inc-001',
+    incidentId: 'INC-202600001',
     residentKey: 'res-001',
     incidentCategory: 'Fire',
     descriptionText:
@@ -425,14 +425,14 @@ export const INCIDENTS: SeedIncident[] = [
     locationDetails: 'Empty lot along Purok 1, near the creek',
     triagePriority: 'Critical',
     evidenceMediaUrls: [
-      'https://s3.region.example.com/kbc/evidence/inc-001-photo1.jpg',
-      'https://s3.region.example.com/kbc/evidence/inc-001-video.mp4',
+      'https://s3.region.example.com/kbc/evidence/INC-202600001-photo1.jpg',
+      'https://s3.region.example.com/kbc/evidence/INC-202600001-video.mp4',
     ],
     incidentStatus: 'Responding',
     reportedAt: '2026-08-12T02:30:00.000Z',
   },
   {
-    incidentId: 'inc-002',
+    incidentId: 'INC-202600002',
     residentKey: 'res-004',
     incidentCategory: 'Flood',
     descriptionText:
@@ -440,13 +440,13 @@ export const INCIDENTS: SeedIncident[] = [
     locationDetails: 'Low-lying area of Purok 4',
     triagePriority: 'High',
     evidenceMediaUrls: [
-      'https://s3.region.example.com/kbc/evidence/inc-002-photo1.jpg',
+      'https://s3.region.example.com/kbc/evidence/INC-202600002-photo1.jpg',
     ],
     incidentStatus: 'Responding',
     reportedAt: '2026-08-12T04:05:00.000Z',
   },
   {
-    incidentId: 'inc-003',
+    incidentId: 'INC-202600003',
     residentKey: 'res-003',
     incidentCategory: 'Medical Emergency',
     descriptionText:
@@ -458,7 +458,7 @@ export const INCIDENTS: SeedIncident[] = [
     reportedAt: '2026-08-11T10:12:00.000Z',
   },
   {
-    incidentId: 'inc-004',
+    incidentId: 'INC-202600004',
     residentKey: 'res-010',
     incidentCategory: 'Road Accident',
     descriptionText:
@@ -466,13 +466,13 @@ export const INCIDENTS: SeedIncident[] = [
     locationDetails: 'Corner of Purok 2 road and national highway',
     triagePriority: 'Medium',
     evidenceMediaUrls: [
-      'https://s3.region.example.com/kbc/evidence/inc-004-photo1.jpg',
+      'https://s3.region.example.com/kbc/evidence/INC-202600004-photo1.jpg',
     ],
     incidentStatus: 'Resolved',
     reportedAt: '2026-08-09T06:48:00.000Z',
   },
   {
-    incidentId: 'inc-005',
+    incidentId: 'INC-202600005',
     residentKey: 'res-002',
     incidentCategory: 'Criminal Activity',
     descriptionText:
@@ -480,13 +480,13 @@ export const INCIDENTS: SeedIncident[] = [
     locationDetails: 'Corner store, Purok 2',
     triagePriority: 'Medium',
     evidenceMediaUrls: [
-      'https://s3.region.example.com/kbc/evidence/inc-005-photo1.jpg',
+      'https://s3.region.example.com/kbc/evidence/INC-202600005-photo1.jpg',
     ],
     incidentStatus: 'Resolved',
     reportedAt: '2026-08-08T22:20:00.000Z',
   },
   {
-    incidentId: 'inc-006',
+    incidentId: 'INC-202600006',
     residentKey: 'res-007',
     incidentCategory: 'Domestic Dispute',
     descriptionText:
@@ -528,10 +528,6 @@ export interface SeedDocumentRequest {
     | 'Rejected';
   expectedCompletionDate: string;
   timeline: SeedTimelineStep[];
-  paymentStatus: 'Unpaid' | 'Paid Offline';
-  verifiedByKey?: string; // adminId
-  verifiedAt?: string;
-  officialReceiptNumber?: string;
   dateRequested: string;
 }
 
@@ -550,10 +546,6 @@ export const DOCUMENT_REQUESTS: SeedDocumentRequest[] = [
       { step: 'Processing', date: '2026-08-13T00:00:00.000Z', status: 'in-progress' },
       { step: 'Ready for Pickup', date: '2026-08-15T00:00:00.000Z', status: 'pending' },
     ],
-    paymentStatus: 'Paid Offline',
-    verifiedByKey: 'adm-002',
-    verifiedAt: '2026-08-12T07:00:00.000Z',
-    officialReceiptNumber: 'OR-2026-0001',
     dateRequested: '2026-08-12T01:00:00.000Z',
   },
   {
@@ -570,7 +562,6 @@ export const DOCUMENT_REQUESTS: SeedDocumentRequest[] = [
       { step: 'Processing', date: '2026-08-11T00:00:00.000Z', status: 'completed' },
       { step: 'Ready for Pickup', date: '2026-08-13T00:00:00.000Z', status: 'completed' },
     ],
-    paymentStatus: 'Unpaid',
     dateRequested: '2026-08-10T02:30:00.000Z',
   },
   {
@@ -587,10 +578,6 @@ export const DOCUMENT_REQUESTS: SeedDocumentRequest[] = [
       { step: 'Processing', date: '2026-08-12T00:00:00.000Z', status: 'in-progress' },
       { step: 'Ready for Pickup', date: '2026-08-18T00:00:00.000Z', status: 'pending' },
     ],
-    paymentStatus: 'Paid Offline',
-    verifiedByKey: 'adm-001',
-    verifiedAt: '2026-08-11T11:00:00.000Z',
-    officialReceiptNumber: 'OR-2026-0002',
     dateRequested: '2026-08-11T05:00:00.000Z',
   },
   {
@@ -606,7 +593,6 @@ export const DOCUMENT_REQUESTS: SeedDocumentRequest[] = [
       { step: 'Processing', date: '2026-08-10T00:00:00.000Z', status: 'completed' },
       { step: 'Ready for Pickup', date: '2026-08-12T00:00:00.000Z', status: 'completed' },
     ],
-    paymentStatus: 'Unpaid',
     dateRequested: '2026-08-09T03:20:00.000Z',
   },
   {
@@ -623,7 +609,6 @@ export const DOCUMENT_REQUESTS: SeedDocumentRequest[] = [
       { step: 'Processing', date: '2026-08-14T00:00:00.000Z', status: 'pending' },
       { step: 'Ready for Pickup', date: '2026-08-17T00:00:00.000Z', status: 'pending' },
     ],
-    paymentStatus: 'Unpaid',
     dateRequested: '2026-08-13T00:30:00.000Z',
   },
 ];
@@ -644,7 +629,7 @@ export interface SeedChatSession {
 export const CHAT_SESSIONS: SeedChatSession[] = [
   {
     sessionId: 'chat-001',
-    incidentKey: 'inc-001',
+    incidentKey: 'INC-202600001',
     residentKey: 'res-001',
     adminKey: 'adm-001',
     isActive: true,
@@ -656,7 +641,7 @@ export const CHAT_SESSIONS: SeedChatSession[] = [
   },
   {
     sessionId: 'chat-002',
-    incidentKey: 'inc-003',
+    incidentKey: 'INC-202600003',
     residentKey: 'res-003',
     adminKey: 'adm-002',
     isActive: true,
@@ -668,7 +653,7 @@ export const CHAT_SESSIONS: SeedChatSession[] = [
   },
   {
     sessionId: 'chat-003',
-    incidentKey: 'inc-002',
+    incidentKey: 'INC-202600002',
     residentKey: 'res-004',
     adminKey: 'adm-001',
     isActive: true,
@@ -680,7 +665,7 @@ export const CHAT_SESSIONS: SeedChatSession[] = [
   },
   {
     sessionId: 'chat-004',
-    incidentKey: 'inc-004',
+    incidentKey: 'INC-202600004',
     residentKey: 'res-010',
     adminKey: 'adm-003',
     isActive: false,
@@ -816,7 +801,7 @@ export const NOTIFICATIONS: SeedNotification[] = [
     notificationCategory: 'incidentAlert',
     titleText: 'High Priority Incident Reported',
     messageBody: 'A Fire incident has been reported in Purok 1.',
-    referenceUrlId: 'inc-001',
+    referenceUrlId: 'INC-202600001',
     isRead: true,
     createdAt: '2026-08-12T02:30:00.000Z',
   },
@@ -826,7 +811,7 @@ export const NOTIFICATIONS: SeedNotification[] = [
     notificationCategory: 'incidentAlert',
     titleText: 'Responders Assigned',
     messageBody: 'Barangay responders have been assigned to your reported Fire incident.',
-    referenceUrlId: 'inc-001',
+    referenceUrlId: 'INC-202600001',
     isRead: false,
     createdAt: '2026-08-12T02:33:00.000Z',
   },
@@ -836,7 +821,7 @@ export const NOTIFICATIONS: SeedNotification[] = [
     notificationCategory: 'incidentAlert',
     titleText: 'Critical Medical Emergency Reported',
     messageBody: 'A Medical Emergency incident has been reported in Purok 3.',
-    referenceUrlId: 'inc-003',
+    referenceUrlId: 'INC-202600003',
     isRead: true,
     createdAt: '2026-08-11T10:12:00.000Z',
   },
