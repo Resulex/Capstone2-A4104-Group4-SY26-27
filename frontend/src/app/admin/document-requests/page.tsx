@@ -6,11 +6,16 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
-import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Alert from "@mui/material/Alert";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogTitle from "@mui/material/DialogTitle";
+import TextField from "@mui/material/TextField";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
 import Select, { SelectChangeEvent } from "@mui/material/Select";
@@ -22,36 +27,15 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
+import { alpha } from "@mui/material/styles";
 import DescriptionIcon from "@mui/icons-material/Description";
-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import CancelIcon from "@mui/icons-material/Cancel";
-import InventoryIcon from "@mui/icons-material/Inventory";
 import { useAuth } from "@/context/AuthContext";
+import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import {
   DocumentQueueRecord,
   fetchDocumentRequests,
   updateDocumentRequest,
 } from "@/lib/admin";
-
-/** Color mapping for a document request's current status. */
-function statusColor(status: string) {
-  switch (status) {
-    case "Ready for Pickup":
-    case "Released":
-      return "success" as const;
-    case "Rejected":
-      return "error" as const;
-    case "Processing":
-      return "info" as const;
-    default:
-      return "warning" as const;
-  }
-}
-
-/** Color mapping for payment status. */
-function paymentColor(status: string) {
-  return status === "Paid Offline" ? ("success" as const) : ("warning" as const);
-}
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -74,18 +58,26 @@ const DOCUMENT_STATUSES = [
 
 /**
  * Admin Document Queue page — lists all document requests with applicant,
- * document type, purpose, status, payment, and request date.
+ * document type, purpose, status, request date, and remarks.
  */
 export default function DocumentRequestsPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
+  const isOnline = useOnlineStatus();
 
   const [documents, setDocuments] = useState<DocumentQueueRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusModal, setStatusModal] = useState<{
+    doc: DocumentQueueRecord;
+    newStatus: string;
+  } | null>(null);
+  const [remarksDraft, setRemarksDraft] = useState("");
+  const [remarksError, setRemarksError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -93,20 +85,64 @@ export default function DocumentRequestsPage() {
     }
   }, [isAuthLoading, isAuthenticated, user, router]);
 
-  const handleStatusChange = async (doc: DocumentQueueRecord, currentStatus: string) => {
+  const openStatusModal = (doc: DocumentQueueRecord, newStatus: string) => {
+    if (newStatus === doc.currentStatus) return;
+    setRemarksDraft("");
+    setRemarksError(null);
+    setActionError(null);
+    setActionSuccess(null);
+    setStatusModal({ doc, newStatus });
+  };
+
+  const closeStatusModal = () => {
+    setStatusModal(null);
+    setRemarksDraft("");
+    setRemarksError(null);
+  };
+
+  const confirmStatusChange = async () => {
+    if (!statusModal) return;
+    const { doc, newStatus } = statusModal;
+    if (newStatus === "Rejected" && !remarksDraft.trim()) {
+      setRemarksError("A remark is required when rejecting a document request.");
+      return;
+    }
+
+    // Guard against a stale resident session: the admin and resident portals
+    // share the `kbc_token` cookie, so signing into the resident app silently
+    // replaces the admin session. Re-validate the CURRENT session role before
+    // performing this staff-only status change.
+    try {
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      const session = (await res.json()) as {
+        authenticated?: boolean;
+        role?: string | null;
+      };
+      if (!session.authenticated || session.role !== "admin") {
+        setActionError(
+          "Your admin session ended. Please log in again as an administrator.",
+        );
+        router.replace("/admin/login");
+        return;
+      }
+    } catch {
+      setActionError("Could not verify your session. Please try again.");
+      return;
+    }
+
     setPendingId(doc.requestId);
     setActionError(null);
+    setActionSuccess(null);
     try {
       const updated = await updateDocumentRequest(doc.requestId, {
-        currentStatus,
+        currentStatus: newStatus,
+        ...(remarksDraft.trim() ? { remarks: remarksDraft.trim() } : {}),
       });
       setDocuments((prev) =>
-        prev.map((d) =>
-          d.requestId === doc.requestId
-            ? { ...d, currentStatus: updated.currentStatus }
-            : d,
-        ),
+        prev.map((d) => (d.requestId === doc.requestId ? updated : d)),
       );
+      closeStatusModal();
+      setActionSuccess(`${doc.requestId} status updated to ${newStatus}.`);
     } catch (err) {
       setActionError(
         err instanceof Error ? err.message : "Failed to update document status.",
@@ -225,14 +261,22 @@ export default function DocumentRequestsPage() {
                     <TableCell sx={{ fontWeight: 700 }}>Document Type</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Purpose</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Payment</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Requested</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Remarks</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {filteredDocuments.map((doc) => (
-                    <TableRow key={doc.requestId} hover>
+                    <TableRow
+                      key={doc.requestId}
+                      hover
+                      sx={(theme) => ({
+                        // Zebra striping using a light tint of the theme color.
+                        "&:nth-of-type(odd)": {
+                          backgroundColor: alpha(theme.palette.primary.main, 0.08),
+                        },
+                      })}
+                    >
                       <TableCell sx={{ fontWeight: 600 }}>
                         {doc.requestId}
                       </TableCell>
@@ -253,78 +297,35 @@ export default function DocumentRequestsPage() {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Chip
-                          label={doc.currentStatus}
-                          size="small"
-                          color={statusColor(doc.currentStatus)}
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={doc.paymentStatus ?? "Unpaid"}
-                          size="small"
-                          color={paymentColor(doc.paymentStatus ?? "Unpaid")}
-                          variant="outlined"
-                        />
+                        <FormControl fullWidth size="small">
+                          <Select
+                            value={doc.currentStatus}
+                            disabled={
+                              doc.currentStatus === "Released" ||
+                              pendingId === doc.requestId
+                            }
+                            inputProps={{ "aria-label": "Document status" }}
+                            onChange={(event) =>
+                              openStatusModal(doc, event.target.value as string)
+                            }
+                          >
+                            {DOCUMENT_STATUSES.map((status) => (
+                              <MenuItem key={status} value={status}>
+                                {status}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
                       </TableCell>
                       <TableCell>{formatDate(doc.dateRequested)}</TableCell>
                       <TableCell>
-                        {(() => {
-                          const status = doc.currentStatus;
-                          const isTerminal =
-                            status === "Rejected" ||
-                            status === "Released" ||
-                            status === "Ready for Pickup";
-                          const isReady =
-                            status === "Ready for Pickup" || status === "Released";
-                          return (
-                            <Stack direction="row" spacing={0.5} flexWrap="wrap">
-                              {!isTerminal && (
-                                <>
-                                  <Button
-                                    size="small"
-                                    variant="outlined"
-                                    color="success"
-                                    startIcon={<CheckCircleIcon />}
-                                    disabled={pendingId === doc.requestId}
-                                    onClick={() =>
-                                      handleStatusChange(doc, "Processing")
-                                    }
-                                  >
-                                    Approve
-                                  </Button>
-                                  <Button
-                                    size="small"
-                                    variant="outlined"
-                                    color="error"
-                                    startIcon={<CancelIcon />}
-                                    disabled={pendingId === doc.requestId}
-                                    onClick={() =>
-                                      handleStatusChange(doc, "Rejected")
-                                    }
-                                  >
-                                    Reject
-                                  </Button>
-                                </>
-                              )}
-                              {!isReady && (
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  color="primary"
-                                  startIcon={<InventoryIcon />}
-                                  disabled={pendingId === doc.requestId}
-                                  onClick={() =>
-                                    handleStatusChange(doc, "Ready for Pickup")
-                                  }
-                                >
-                                  Mark as Ready
-                                </Button>
-                              )}
-                            </Stack>
-                          );
-                        })()}
+                        <Typography
+                          variant="body2"
+                          noWrap
+                          sx={{ maxWidth: 240, minWidth: 120 }}
+                        >
+                          {doc.remarks || "—"}
+                        </Typography>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -335,12 +336,88 @@ export default function DocumentRequestsPage() {
         </CardContent>
       </Card>
 
+      <Dialog open={Boolean(statusModal)} onClose={closeStatusModal}>
+        <DialogTitle>Update document status</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Change the status of request {statusModal?.doc.requestId} to{" "}
+            {statusModal?.newStatus}?
+          </DialogContentText>
+          {statusModal?.newStatus === "Released" && (
+            <DialogContentText sx={{ mt: 1, color: "warning.main" }}>
+              Please make sure that this document has already been paid before
+              proceeding.
+            </DialogContentText>
+          )}
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Remarks"
+            multiline
+            minRows={2}
+            fullWidth
+            required={statusModal?.newStatus === "Rejected"}
+            value={remarksDraft}
+            onChange={(event) => {
+              setRemarksDraft(event.target.value);
+              if (remarksError) setRemarksError(null);
+            }}
+            error={Boolean(remarksError)}
+            helperText={
+              remarksError ??
+              (statusModal?.newStatus === "Rejected"
+                ? "A remark explaining the rejection is required."
+                : "Optional — add a note for the resident.")
+            }
+            placeholder={
+              statusModal?.newStatus === "Rejected"
+                ? "e.g. Missing supporting document"
+                : undefined
+            }
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeStatusModal} color="inherit">
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmStatusChange}
+            variant="contained"
+            color="primary"
+            disabled={pendingId !== null || !isOnline}
+          >
+            Update Status
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        open={Boolean(actionSuccess)}
+        autoHideDuration={4000}
+        onClose={() => setActionSuccess(null)}
+      >
+        <Alert
+          severity="success"
+          variant="filled"
+          onClose={() => setActionSuccess(null)}
+        >
+          {actionSuccess}
+        </Alert>
+      </Snackbar>
+
       <Snackbar
         open={Boolean(actionError)}
         autoHideDuration={6000}
         onClose={() => setActionError(null)}
-        message={actionError ?? ""}
-      />
+      >
+        <Alert
+          severity="error"
+          variant="filled"
+          onClose={() => setActionError(null)}
+        >
+          {actionError}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

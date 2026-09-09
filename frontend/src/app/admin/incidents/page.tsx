@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import CircularProgress from "@mui/material/CircularProgress";
 import Alert from "@mui/material/Alert";
 import Snackbar from "@mui/material/Snackbar";
+import Chip from "@mui/material/Chip";
 import Stack from "@mui/material/Stack";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
@@ -20,7 +22,12 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
+import { alpha } from "@mui/material/styles";
+import IconButton from "@mui/material/IconButton";
+import Avatar from "@mui/material/Avatar";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import ForumIcon from "@mui/icons-material/Forum";
+import ImageIcon from "@mui/icons-material/Image";
 import { useAuth } from "@/context/AuthContext";
 import {
   IncidentRecord,
@@ -29,9 +36,9 @@ import {
   fetchResidents,
   updateIncidentReport,
 } from "@/lib/admin";
+import { isImageUrl } from "@/lib/uploads";
 
-/** Allowed triage priorities and incident statuses (match backend enums). */
-const INCIDENT_PRIORITIES = ["Critical", "High", "Medium", "Low"] as const;
+/** Allowed incident statuses (match backend enums). */
 const INCIDENT_STATUSES = [
   "Pending",
   "Responding",
@@ -39,14 +46,34 @@ const INCIDENT_STATUSES = [
   "Closed",
 ] as const;
 
-/** Build a map of resident ObjectId → full name for reporter lookup. */
+/** Priority rank for the command-center sort (highest urgency first). */
+const PRIORITY_RANK: Record<string, number> = {
+  Critical: 0,
+  High: 1,
+  Medium: 2,
+  Low: 3,
+};
+
+/**
+ * Command-center ordering: primarily by priority (HIGH first), with the most
+ * recently reported incident first within the same priority level.
+ */
+function compareIncidents(a: IncidentRecord, b: IncidentRecord): number {
+  const rankDiff =
+    (PRIORITY_RANK[a.triagePriority] ?? 99) -
+    (PRIORITY_RANK[b.triagePriority] ?? 99);
+  if (rankDiff !== 0) return rankDiff;
+  return new Date(b.reportedAt).getTime() - new Date(a.reportedAt).getTime();
+}
+
+/** Build a map of resident ObjectId (+ residentId) → full name for reporter lookup. */
 function buildReporterMap(residents: ResidentRecord[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const r of residents) {
-    const key = r._id ?? r.residentId;
     const name =
       [r.firstName, r.lastName].filter(Boolean).join(" ") || r.residentId;
-    map.set(key, name);
+    if (r._id) map.set(r._id, name);
+    if (r.residentId) map.set(r.residentId, name);
   }
   return map;
 }
@@ -59,6 +86,20 @@ function formatDate(iso: string): string {
     day: "numeric",
     year: "numeric",
   });
+}
+
+/** Color mapping for the auto-assigned triage priority (read-only badge). */
+function priorityColor(priority: string) {
+  switch (priority) {
+    case "Critical":
+      return "error" as const;
+    case "High":
+      return "warning" as const;
+    case "Medium":
+      return "info" as const;
+    default:
+      return "success" as const;
+  }
 }
 
 /**
@@ -142,10 +183,13 @@ export default function IncidentsPage() {
     return null;
   }
 
-  const filteredIncidents =
+  const filteredIncidents = (
     statusFilter === "all"
       ? incidents
-      : incidents.filter((i) => i.incidentStatus === statusFilter);
+      : incidents.filter((i) => i.incidentStatus === statusFilter)
+  )
+    .slice()
+    .sort(compareIncidents);
 
   return (
     <Box>
@@ -239,21 +283,31 @@ export default function IncidentsPage() {
                     <TableCell sx={{ fontWeight: 700 }}>Category</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Reporter</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Media</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Priority</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Reported</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {filteredIncidents.map((incident) => (
-                    <TableRow key={incident.incidentId} hover>
+                    <TableRow
+                      key={incident.incidentId}
+                      hover
+                      sx={(theme) => ({
+                        // Zebra striping using a light tint of the theme color.
+                        "&:nth-of-type(odd)": {
+                          backgroundColor: alpha(theme.palette.primary.main, 0.08),
+                        },
+                      })}
+                    >
                       <TableCell sx={{ fontWeight: 600 }}>
                         {incident.incidentId}
                       </TableCell>
                       <TableCell>{incident.incidentCategory}</TableCell>
                       <TableCell>
-                        {reporterNames.get(incident.residentId) ??
-                          incident.residentId}
+                        {reporterNames.get(incident.residentId) ?? "Unknown"}
                       </TableCell>
                       <TableCell>
                         <Typography
@@ -265,24 +319,48 @@ export default function IncidentsPage() {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <FormControl size="small" sx={{ minWidth: 120 }}>
-                          <Select
-                            id={`priority-${incident.incidentId}`}
-                            value={incident.triagePriority}
-                            disabled={pendingId === incident.incidentId}
-                            onChange={(event: SelectChangeEvent) =>
-                              handleUpdate(incident, {
-                                triagePriority: event.target.value,
-                              })
-                            }
-                          >
-                            {INCIDENT_PRIORITIES.map((priority) => (
-                              <MenuItem key={priority} value={priority}>
-                                {priority}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
+                        {incident.evidenceMediaUrls?.length ? (
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <IconButton
+                              size="small"
+                              component="a"
+                              href={incident.evidenceMediaUrls[0]}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label="View evidence media"
+                            >
+                              {isImageUrl(incident.evidenceMediaUrls[0]) ? (
+                                <Avatar
+                                  variant="rounded"
+                                  src={incident.evidenceMediaUrls[0]}
+                                  alt="Evidence"
+                                  sx={{ width: 48, height: 48 }}
+                                >
+                                  <ImageIcon />
+                                </Avatar>
+                              ) : (
+                                <ImageIcon />
+                              )}
+                            </IconButton>
+                            {incident.evidenceMediaUrls.length > 1 && (
+                              <Typography variant="caption" color="text.secondary">
+                                +{incident.evidenceMediaUrls.length - 1}
+                              </Typography>
+                            )}
+                          </Stack>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">
+                            —
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={incident.triagePriority}
+                          size="small"
+                          color={priorityColor(incident.triagePriority)}
+                          variant="outlined"
+                        />
                       </TableCell>
                       <TableCell>
                         <FormControl size="small" sx={{ minWidth: 130 }}>
@@ -305,6 +383,21 @@ export default function IncidentsPage() {
                         </FormControl>
                       </TableCell>
                       <TableCell>{formatDate(incident.reportedAt)}</TableCell>
+                      <TableCell>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="primary"
+                          startIcon={<ForumIcon />}
+                          onClick={() =>
+                            router.push(
+                              `/admin/chat-sessions?incident=${encodeURIComponent(incident.incidentId)}`,
+                            )
+                          }
+                        >
+                          Open Triage Chat
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

@@ -17,3 +17,8 @@ export {
 export { ChatSession, type IChatSession, type IDeviceInfo } from './chat-session.model';
 export { Message, type IMessage } from './message.model';
 export { Notification, type INotification } from './notification.model';
+export { AdminConnection, type IAdminConnection } from './admin-connection.model';
+export {
+  ResidentConnection,
+  type IResidentConnection,
+} from './resident-connection.model';

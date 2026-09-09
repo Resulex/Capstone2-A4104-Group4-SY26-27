@@ -53,9 +53,16 @@ export function DocumentRequestCard({ request, href }: DocumentRequestCardProps)
               <Typography
                 variant="subtitle1"
                 component="h3"
-                sx={{ fontWeight: 700, lineHeight: 1.3, mb: 0.5 }}
+                sx={{ fontWeight: 700, lineHeight: 1.3, mb: 0.25 }}
               >
                 {request.documentType}
+              </Typography>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: "block", mb: 0.5 }}
+              >
+                Request ID: {request.requestId}
               </Typography>
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
                 <StatusChip status={request.currentStatus} />

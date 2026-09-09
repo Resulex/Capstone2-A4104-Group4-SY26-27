@@ -13,6 +13,39 @@ import mongoose from 'mongoose';
 let cachedConnection: mongoose.Connection | null = null;
 let connecting: Promise<mongoose.Connection> | null = null;
 
+const CONNECT_OPTIONS: mongoose.ConnectOptions = {
+  serverSelectionTimeoutMS: 8000,
+  maxPoolSize: 1, // Lambda containers are single-request; keep pool minimal.
+  // Do NOT let operations silently buffer for 10s when the connection drops —
+  // fail fast with the real server-selection error instead (see
+  // MongooseError "buffering timed out").
+  bufferCommands: false,
+};
+
+/** Attach one-time logging so the server terminal shows DB state changes. */
+function wireConnectionLogging(conn: mongoose.Connection): void {
+  if ((conn as unknown as { __kbcWired?: boolean }).__kbcWired) return;
+  (conn as unknown as { __kbcWired: boolean }).__kbcWired = true;
+
+  conn.on('connected', () => {
+    // eslint-disable-next-line no-console
+    console.log('[db] mongoose connected');
+  });
+  conn.on('reconnected', () => {
+    // eslint-disable-next-line no-console
+    console.log('[db] mongoose reconnected');
+  });
+  conn.on('disconnected', () => {
+    // eslint-disable-next-line no-console
+    console.warn('[db] mongoose disconnected — next call will reconnect fresh.');
+    cachedConnection = null;
+  });
+  conn.on('error', (err: Error) => {
+    // eslint-disable-next-line no-console
+    console.error('[db] mongoose error:', err?.message ?? err);
+  });
+}
+
 /**
  * Returns a single shared Mongoose connection, reusing the cached one when
  * available. Call this at the top of every handler that touches the database.
@@ -41,18 +74,24 @@ export async function connectToDatabase(): Promise<mongoose.Connection> {
     return connecting;
   }
 
+  const startedAt = Date.now();
+  // eslint-disable-next-line no-console
+  console.log('[db] connecting to MongoDB...');
   connecting = mongoose
-    .connect(uri, {
-      serverSelectionTimeoutMS: 5000,
-      maxPoolSize: 1, // Lambda containers are single-request; keep pool minimal.
-    })
-    .then((connection) => {
-      cachedConnection = connection.connection;
+    .connect(uri, CONNECT_OPTIONS)
+    .then((mongooseInstance) => {
+      const conn = mongooseInstance.connection;
+      cachedConnection = conn;
       connecting = null;
-      return cachedConnection;
+      wireConnectionLogging(conn);
+      // eslint-disable-next-line no-console
+      console.log(`[db] connected in ${Date.now() - startedAt} ms`);
+      return conn;
     })
-    .catch((error) => {
+    .catch((error: Error) => {
       connecting = null;
+      // eslint-disable-next-line no-console
+      console.error('[db] connect error:', error?.message ?? error);
       throw error;
     });
 

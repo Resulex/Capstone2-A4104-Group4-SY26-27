@@ -9,6 +9,7 @@ import ListItem from "@mui/material/ListItem";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
+import Badge from "@mui/material/Badge";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import Image from "next/image";
@@ -27,6 +28,7 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import SettingsIcon from "@mui/icons-material/Settings";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { AdminProfile, getInitials } from "@/hooks/useAdminProfile";
+import { canViewNavItem } from "@/lib/rbac";
 
 /** Width of the expanded (persistent) drawer. */
 export const SIDEBAR_WIDTH = 240;
@@ -44,6 +46,10 @@ interface AdminSidebarProps {
   adminProfile: AdminProfile | null;
   /** Sign out handler. */
   onLogout: () => void;
+  /** Unread incident reports (badge on the Incident Reports nav icon). */
+  unreadIncidentsCount?: number;
+  /** Unread document requests (badge on the Document Queue nav icon). */
+  unreadDocumentsCount?: number;
 }
 
 interface NavItem {
@@ -72,6 +78,11 @@ const NAV_ITEMS: NavItem[] = [
     href: "/admin/notifications",
   },
   { label: "Settings", icon: <SettingsIcon />, href: "/admin/settings" },
+  {
+    label: "User Management",
+    icon: <GroupIcon />,
+    href: "/admin/settings/users",
+  },
 ];
 
 /**
@@ -87,15 +98,28 @@ export function AdminSidebar({
   onMobileClose,
   adminProfile,
   onLogout,
+  unreadIncidentsCount = 0,
+  unreadDocumentsCount = 0,
 }: AdminSidebarProps) {
   const pathname = usePathname();
 
+  const role = adminProfile?.assignedRole;
+  const visibleItems = NAV_ITEMS.filter((item) =>
+    canViewNavItem(role, item.href),
+  );
+
   const navList = (
     <List component="nav" aria-label="Admin navigation" sx={{ px: 1, py: 1 }}>
-      {NAV_ITEMS.map((item) => {
+      {visibleItems.map((item) => {
         const isActive = item.href === "/admin"
           ? pathname === "/admin"
           : pathname.startsWith(item.href);
+        const unreadFor =
+          item.href === "/admin/incidents"
+            ? unreadIncidentsCount
+            : item.href === "/admin/document-requests"
+              ? unreadDocumentsCount
+              : 0;
         return (
           <ListItem key={item.label} disablePadding sx={{ mb: 0.5 }}>
             <Tooltip
@@ -123,7 +147,18 @@ export function AdminSidebar({
                     color: isActive ? "primary.main" : "text.secondary",
                   }}
                 >
-                  {item.icon}
+                  {unreadFor > 0 ? (
+                    <Badge
+                      badgeContent={unreadFor}
+                      color="error"
+                      overlap="circular"
+                      max={9}
+                    >
+                      {item.icon}
+                    </Badge>
+                  ) : (
+                    item.icon
+                  )}
                 </ListItemIcon>
                 {expanded && <ListItemText primary={item.label} />}
               </ListItemButton>

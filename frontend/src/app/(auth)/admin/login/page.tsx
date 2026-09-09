@@ -2,8 +2,10 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
@@ -12,7 +14,6 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import Alert from "@mui/material/Alert";
-import Chip from "@mui/material/Chip";
 import Stepper from "@mui/material/Stepper";
 import Step from "@mui/material/Step";
 import StepLabel from "@mui/material/StepLabel";
@@ -24,24 +25,33 @@ import { QRCodeSVG } from "qrcode.react";
 import { useAuth } from "@/context/AuthContext";
 import { ApiError, fetchJson } from "@/lib/api";
 
-const STEPS = ["Credentials", "MFA Verification", "Authenticator Setup"];
+const STEPS = ["Credentials", "Verification", "Authenticator Setup"];
 
-// Backend login/totp responses use the `{ success, data, message }` envelope.
+// Backend responses use the `{ success, data, message }` envelope.
 interface LoginData {
   token?: string;
   user?: unknown;
   authenticated?: boolean;
-  needsSetup?: boolean;
-  enrollmentJwt?: string;
+  /** Enrolled → prompt for the 6-digit authenticator code. */
+  needsTotp?: boolean;
+  /** Not enrolled yet → run the QR setup steps. */
+  needsTotpSetup?: boolean;
+  session?: string;
+}
+
+interface MfaLoginData {
+  token?: string;
+  user?: unknown;
 }
 
 interface SetupData {
-  secret?: string;
   otpauthUrl?: string;
+  secret?: string;
+  session?: string;
 }
 
 interface VerifyData {
-  backupCodes?: string[];
+  setupComplete?: boolean;
 }
 
 export default function AdminLoginPage() {
@@ -51,48 +61,21 @@ export default function AdminLoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [token, setTokenValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Enrollment (first-login) state.
-  const [enrollmentJwt, setEnrollmentJwt] = useState<string | null>(null);
+  // MFA state — the one-time Cognito challenge `session` (stateless
+  // round-trip), the 6-digit authenticator code, and the TOTP enrollment
+  // data (QR provisioning URI + raw secret shown only once).
+  const [session, setSession] = useState<string | null>(null);
+  const [code, setCode] = useState("");
   const [otpauthUrl, setOtpauthUrl] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
-  const [verificationCode, setVerificationCode] = useState("");
 
-  // Load the authenticator provisioning data as soon as the setup step opens.
-  useEffect(() => {
-    if (step !== 2 || !enrollmentJwt || otpauthUrl) return;
-
-    let cancelled = false;
-    (async () => {
-      setError(null);
-      try {
-        const body = await fetchJson<{ data?: SetupData }>(
-          "/api/auth/admin/totp/setup",
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${enrollmentJwt}` },
-          },
-        );
-        if (cancelled) return;
-        setOtpauthUrl(body.data?.otpauthUrl ?? null);
-        setSecret(body.data?.secret ?? null);
-      } catch (err) {
-        if (cancelled) return;
-        setError(
-          err instanceof ApiError
-            ? err.message
-            : "Failed to start authenticator setup. Please try again.",
-        );
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [step, enrollmentJwt, otpauthUrl]);
+  const finishLogin = async (tokenValue: string) => {
+    await setToken(tokenValue, "admin");
+    router.push("/admin");
+  };
 
   const handleCredentialsSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -117,21 +100,32 @@ export default function AdminLoginPage() {
       );
       const data = body.data;
 
-      // Fully authenticated in a single step.
+      // Security: step-1 /login must NEVER return a session token. Every admin
+      // is required to complete a TOTP challenge (enrolled → 6-digit code,
+      // not enrolled → QR setup). If a token ever arrives here (e.g. an older
+      // backend), refuse to auto-login without MFA.
       if (data?.token) {
-        await setToken(data.token, "admin");
-        router.push("/admin");
+        setError(
+          "Two-factor authentication is required for this account. Please try again.",
+        );
         return;
       }
 
-      if (data?.needsSetup) {
-        // First login — no authenticator enrolled yet. Show the QR setup.
-        setEnrollmentJwt(data.enrollmentJwt ?? null);
-        setStep(2);
-      } else {
-        // MFA enrolled — prompt for the OTP.
+      if (data?.needsTotp && data.session) {
+        // Enrolled → prompt for the 6-digit authenticator code.
+        setSession(data.session);
         setStep(1);
+        return;
       }
+
+      if (data?.needsTotpSetup && data.session) {
+        // Not enrolled → show the QR setup step.
+        setSession(data.session);
+        setStep(2);
+        return;
+      }
+
+      setError("Unexpected login response. Please try again.");
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -143,25 +137,26 @@ export default function AdminLoginPage() {
     }
   };
 
-  const handleTokenSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  /** Step 1 — already enrolled: verify the 6-digit authenticator code. */
+  const handleCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
 
-    if (token.trim().length !== 6) {
-      setError("Please enter the 6-digit verification token.");
+    if (!session || code.trim().length !== 6) {
+      setError("Please enter the 6-digit verification code.");
       return;
     }
 
     setSubmitting(true);
     try {
-      const body = await fetchJson<{ data?: LoginData }>(
-        "/api/auth/admin/login",
+      const body = await fetchJson<{ data?: MfaLoginData }>(
+        "/api/auth/admin/login/mfa",
         {
           method: "POST",
           body: JSON.stringify({
             userName: username.trim(),
-            password,
-            code: token,
+            session,
+            code,
           }),
         },
       );
@@ -169,58 +164,101 @@ export default function AdminLoginPage() {
       if (!data?.token) {
         throw new ApiError(0, "No authentication token was returned.");
       }
-      await setToken(data.token, "admin");
-      router.push("/admin");
+      await finishLogin(data.token);
     } catch (err) {
       setError(
         err instanceof ApiError
           ? err.message
-          : "Login failed. Please check your credentials and token and try again.",
+          : "Verification failed. Please check your code and try again.",
       );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleVerifyCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  // Step 2a — load the QR provisioning data as soon as the setup step opens.
+  useEffect(() => {
+    if (step !== 2 || !session || otpauthUrl) return;
+
+    let cancelled = false;
+    (async () => {
+      setError(null);
+      try {
+        const body = await fetchJson<{ data?: SetupData }>(
+          "/api/auth/admin/login/totp/setup",
+          {
+            method: "POST",
+            body: JSON.stringify({ userName: username.trim(), session }),
+          },
+        );
+        if (cancelled) return;
+        setOtpauthUrl(body.data?.otpauthUrl ?? null);
+        setSecret(body.data?.secret ?? null);
+        if (body.data?.session) setSession(body.data.session);
+      } catch (err) {
+        if (cancelled) return;
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : "Failed to start authenticator setup. Please try again.",
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [step, session, otpauthUrl, username]);
+
+  // Step 2b — verify the new authenticator, then re-submit credentials so the
+  // now-enabled MFA returns a real code challenge (step 1) to finish login.
+  const handleSetupCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
 
-    if (verificationCode.trim().length !== 6) {
+    if (!session || code.trim().length !== 6) {
       setError("Please enter the 6-digit verification code.");
-      return;
-    }
-    if (!enrollmentJwt) {
-      setError("Authenticator setup session expired. Please start over.");
       return;
     }
 
     setSubmitting(true);
     try {
-      await fetchJson<{ data?: VerifyData }>("/api/auth/admin/totp/verify", {
+      await fetchJson<{ data?: VerifyData }>("/api/auth/admin/login/totp/verify", {
         method: "POST",
-        headers: { Authorization: `Bearer ${enrollmentJwt}` },
-        body: JSON.stringify({ code: verificationCode }),
+        body: JSON.stringify({ userName: username.trim(), session, code }),
       });
 
-      // Now complete the login with the same code to obtain a full session.
-      const loginBody = await fetchJson<{ data?: LoginData }>(
+      // MFA is now enabled → sign in again to obtain the real challenge.
+      const body = await fetchJson<{ data?: LoginData }>(
         "/api/auth/admin/login",
         {
           method: "POST",
           body: JSON.stringify({
             userName: username.trim(),
             password,
-            code: verificationCode,
           }),
         },
       );
-      const data = loginBody.data;
-      if (!data?.token) {
-        throw new ApiError(0, "No authentication token was returned.");
+      const data = body.data;
+
+      // After enrollment the re-login returns a real SOFTWARE_TOKEN_MFA
+      // challenge (needsTotp). A token at this step would mean MFA was
+      // bypassed — treat it as an error, never auto-login.
+      if (data?.needsTotp && data.session) {
+        setSession(data.session);
+        setCode("");
+        setStep(1);
+        return;
       }
-      await setToken(data.token, "admin");
-      router.push("/admin");
+      if (data?.token) {
+        setError(
+          "Authenticator registered, but MFA was not enforced on sign-in. Please try again.",
+        );
+        return;
+      }
+      setError(
+        "Authenticator registered, but the sign-in step was unexpected. Please try again.",
+      );
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -235,11 +273,10 @@ export default function AdminLoginPage() {
   const handleBack = () => {
     setStep(0);
     setError(null);
-    setTokenValue("");
-    setVerificationCode("");
+    setSession(null);
+    setCode("");
     setOtpauthUrl(null);
     setSecret(null);
-    setEnrollmentJwt(null);
   };
 
   return (
@@ -336,6 +373,14 @@ export default function AdminLoginPage() {
                 }}
               />
 
+              <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                <Link href="/admin/forgot-password" aria-label="Forgot password">
+                  <Typography component="span" variant="body2" color="primary" sx={{ fontWeight: 600 }}>
+                    Forgot password?
+                  </Typography>
+                </Link>
+              </Box>
+
               <Button
                 type="submit"
                 variant="contained"
@@ -349,11 +394,12 @@ export default function AdminLoginPage() {
             </Stack>
           </Box>
         ) : step === 1 ? (
-          /* Step 2 — MFA Verification (already enrolled) */
-          <Box component="form" onSubmit={handleTokenSubmit} noValidate>
+          /* Step 2 — Authenticator code (already enrolled) */
+          <Box component="form" onSubmit={handleCodeSubmit} noValidate>
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                Enter the 6-digit verification code from your authenticator app.
+                Enter the 6-digit code from your authenticator app (e.g. Google
+                Authenticator) to finish signing in.
               </Typography>
               <TextField
                 label="Verification Code"
@@ -362,15 +408,15 @@ export default function AdminLoginPage() {
                 autoComplete="one-time-code"
                 fullWidth
                 required
-                value={token}
+                value={code}
                 onChange={(e) =>
-                  setTokenValue(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
                 }
                 inputProps={{
-                  "aria-label": "6-digit verification code",
+                  "aria-label": "6-digit authenticator code",
                   maxLength: 6,
                 }}
-                helperText={`${token.length}/6 digits entered`}
+                helperText={`${code.length}/6 digits entered`}
               />
 
               <Button
@@ -379,7 +425,7 @@ export default function AdminLoginPage() {
                 color="primary"
                 size="large"
                 fullWidth
-                disabled={submitting || token.length !== 6}
+                disabled={submitting || code.length !== 6}
               >
                 VERIFY &amp; SIGN IN
               </Button>
@@ -395,13 +441,13 @@ export default function AdminLoginPage() {
               </Button>
             </Stack>
           </Box>
-        ) : (
-          /* Step 3 — Authenticator Setup (first login) */
-          <Box component="form" onSubmit={handleVerifyCodeSubmit} noValidate>
+        ) : step === 2 ? (
+          /* Step 3 — Authenticator Setup (first login / QR enrollment) */
+          <Box component="form" onSubmit={handleSetupCodeSubmit} noValidate>
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
                 {otpauthUrl
-                  ? "Scan the QR code with your authenticator app (e.g. Google Authenticator), then enter the 6-digit code to verify."
+                  ? "Scan the QR code with your authenticator app (e.g. Google Authenticator), then enter the 6-digit code to register it."
                   : "Preparing your authenticator setup…"}
               </Typography>
 
@@ -434,17 +480,15 @@ export default function AdminLoginPage() {
                 autoComplete="one-time-code"
                 fullWidth
                 required
-                value={verificationCode}
+                value={code}
                 onChange={(e) =>
-                  setVerificationCode(
-                    e.target.value.replace(/\D/g, "").slice(0, 6),
-                  )
+                  setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
                 }
                 inputProps={{
                   "aria-label": "6-digit verification code",
                   maxLength: 6,
                 }}
-                helperText={`${verificationCode.length}/6 digits entered`}
+                helperText={`${code.length}/6 digits entered`}
               />
 
               <Button
@@ -453,11 +497,9 @@ export default function AdminLoginPage() {
                 color="primary"
                 size="large"
                 fullWidth
-                disabled={
-                  submitting || verificationCode.length !== 6 || !otpauthUrl
-                }
+                disabled={submitting || code.length !== 6 || !otpauthUrl}
               >
-                VERIFY &amp; COMPLETE SETUP
+                REGISTER AUTHENTICATOR
               </Button>
 
               <Button
@@ -471,7 +513,7 @@ export default function AdminLoginPage() {
               </Button>
             </Stack>
           </Box>
-        )}
+        ) : null}
 
         <Divider />
 

@@ -2,13 +2,14 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-l
 import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody } from '../../../shared/handler';
 import { created, badRequest } from '../../../shared/responses';
-import { conflictError, badRequestError } from '../../../shared/errors';
+import { badRequestError } from '../../../shared/errors';
 import { IncidentReport, Resident } from '../../../models';
 import {
   getAuthContext,
   assertOwnResidentRef,
 } from '../../../shared/authorization';
 import { ensureResidentForUser } from '../../../shared/residents';
+import { residentFullName, notifyAllActiveAdmins } from '../../../shared/notifications';
 
 interface CreateIncidentBody {
   incidentId?: string;
@@ -30,6 +31,57 @@ interface CreateIncidentBody {
 }
 
 /**
+ * Rule-based triage: the system derives the severity from the incident
+ * category + certain urgency keywords in the description (not chosen by a
+ * human). Falls back to 'Low'.
+ */
+function computeTriagePriority(
+  category: string,
+  description: string
+): 'Critical' | 'High' | 'Medium' | 'Low' {
+  // Residents may describe incidents in English or everyday Filipino, so the
+  // rules match common terms from both. Word boundaries avoid false-positive
+  // substring matches (e.g. "baha" inside "bahagi", "gulo" inside "gulong").
+  const text = `${category} ${description}`.toLowerCase();
+  if (
+    /\b(fire|burning|life|critical|emergency|death|unconscious|sunog|nasusunog|apoy|buhay|patay|kritikal|emerhensiya|walang malay|sakuna)\b/.test(
+      text
+    )
+  ) {
+    return 'Critical';
+  }
+  if (
+    /\b(criminal|robbery|assault|stab|shooting|accident|major|severe|krimen|nakawan|saksak|pamamaril|aksidente|seryoso|malala|suntukan)\b/.test(
+      text
+    )
+  ) {
+    return 'High';
+  }
+  if (
+    /\b(flood|water|infrastructure|damage|disturbance|injury|baha|tubig|sira|nasira|gulo|pinsala|basag)\b/.test(
+      text
+    )
+  ) {
+    return 'Medium';
+  }
+  return 'Low';
+}
+
+/** Builds the next sequential incident id (INC-<year><5-digit seq>). */
+async function nextIncidentId(): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `INC-${year}`;
+  const last = await IncidentReport.findOne({
+    incidentId: { $regex: `^${prefix}\\d{5}$` },
+  })
+    .sort({ incidentId: -1 })
+    .select('incidentId')
+    .lean();
+  const seq = last ? parseInt(last.incidentId.slice(prefix.length), 10) + 1 : 1;
+  return `${prefix}${String(seq).padStart(5, '0')}`;
+}
+
+/**
  * Incident Reports — Create
  * Use-case: create an incident report. Residents report their own incidents;
  * staff/admin may create for any resident.
@@ -42,18 +94,19 @@ export async function createIncidentReport(
   const auth = getAuthContext(event);
   const body = parseBody(event) as CreateIncidentBody;
 
-  const { incidentId, incidentCategory, descriptionText, locationDetails } = body;
+  const { incidentCategory, descriptionText, locationDetails } = body;
 
-  // The report owner is derived from the authenticated caller for residents —
-  // their JWT `sub` is their Resident `_id`, so the client never needs to send
-  // a `residentId`. Staff/admin may still supply an explicit `residentId` to
-  // file a report on a resident's behalf.
+  // The report owner is derived from the caller for self-service creates — a
+  // resident's (or official's, acting through the resident portal) JWT `sub` is
+  // their own Resident `_id`, so the client never needs to send a `residentId`.
+  // Admins filing on a resident's behalf must still supply an explicit
+  // `residentId`.
   const effectiveResidentId =
-    auth.role === 'resident' ? auth.userId : body.residentId;
+    body.residentId || (auth.role === 'admin' ? undefined : auth.userId);
 
-  if (!incidentId || !effectiveResidentId || !incidentCategory || !descriptionText || !locationDetails) {
+  if (!effectiveResidentId || !incidentCategory || !descriptionText || !locationDetails) {
     return badRequest(
-      'incidentId, residentId, incidentCategory, descriptionText, and locationDetails are required.'
+      'residentId, incidentCategory, descriptionText, and locationDetails are required.'
     );
   }
 
@@ -62,33 +115,39 @@ export async function createIncidentReport(
 
   await connectToDatabase();
 
-  const existing = await IncidentReport.findOne({ incidentId });
-  if (existing) {
-    throw conflictError('An incident report with this incidentId already exists.');
-  }
-
-  // A resident caller always has a Resident (auto-provisioned if missing);
-  // staff/admin must supply a valid residentId.
+  // A resident/official caller always has a Resident (auto-provisioned if
+  // missing); an admin must supply a valid residentId.
   const resident =
-    auth.role === 'resident'
-      ? await ensureResidentForUser(effectiveResidentId)
-      : await Resident.findOne({
+    auth.role === 'admin'
+      ? await Resident.findOne({
           $or: [{ _id: effectiveResidentId }, { residentId: effectiveResidentId }],
-        });
+        })
+      : await ensureResidentForUser(effectiveResidentId);
   if (!resident) {
     throw badRequestError('Invalid residentId.');
   }
 
+  const incidentId = await nextIncidentId();
   const report = await IncidentReport.create({
     incidentId,
     residentId: resident._id,
     incidentCategory,
     descriptionText,
     locationDetails,
-    triagePriority: 'Low', // default; Rule-Based Prioritization would compute this
+    // System-driven triage: priority is computed by rules, not chosen by a human.
+    triagePriority: computeTriagePriority(incidentCategory, descriptionText),
     evidenceMediaUrls: body.evidenceMediaUrls || [],
     incidentStatus: body.incidentStatus || 'Pending',
     reportedAt: new Date(),
+  });
+
+  // Notify all active admins of the new incident over the real-time channel.
+  const name = await residentFullName(String(resident._id));
+  await notifyAllActiveAdmins({
+    category: 'incidentAlert',
+    titleText: 'New Incident Report',
+    messageBody: `${name} created an incident report: ${incidentCategory}: ${descriptionText}`,
+    referenceUrlId: incidentId,
   });
 
   return created(report.toObject(), 'Incident report created.');

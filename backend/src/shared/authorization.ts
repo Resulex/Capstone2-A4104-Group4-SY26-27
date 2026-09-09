@@ -2,6 +2,7 @@ import type { APIGatewayProxyEvent } from 'aws-lambda';
 import mongoose from 'mongoose';
 import { forbiddenError, unauthorizedError, notFoundError } from './errors';
 import { Admin } from '../models';
+import { connectToDatabase } from '../config/db';
 
 /**
  * RBAC authorization helpers.
@@ -20,7 +21,7 @@ import { Admin } from '../models';
  */
 
 export type AppRole = 'resident' | 'official' | 'admin';
-export type AdminAssignedRole = 'Admin' | 'Moderator' | 'Content Admin';
+export type AdminAssignedRole = 'SUPER_ADMIN' | 'OPERATIONS_CLERK' | 'INFO_OFFICER';
 
 export interface AuthContext {
   userId: string;
@@ -59,6 +60,10 @@ export async function loadAdminContext(
   if (auth.role !== 'admin') {
     throw forbiddenError('This operation requires an administrator.');
   }
+  // Ensure the connection exists BEFORE the first query below — handlers call
+  // resolveAuthContext() before their own connectToDatabase(), so on a cold
+  // start this query would otherwise buffer and time out.
+  await connectToDatabase();
   const admin = await Admin.findOne({ adminId: auth.userId })
     .orFail()
     .catch(() => null);
@@ -134,6 +139,14 @@ export function requireAssignedRole(
   }
 }
 
+/**
+ * Throws 403 unless the caller is an admin with the SUPER_ADMIN role.
+ * Super admins own user/role management.
+ */
+export function requireSuperAdmin(auth: AuthContext): void {
+  requireAssignedRole(auth, ['SUPER_ADMIN']);
+}
+
 // ---------------------------------------------------------------------------
 // Ownership guards (data isolation)
 // ---------------------------------------------------------------------------
@@ -142,16 +155,21 @@ export function requireAssignedRole(
  * Returns the resident ObjectId whose data the caller is allowed to manage.
  * - admin: unrestricted (returns null meaning "no scope").
  * - official: scoped to their barangay (handled by the caller via barangayId).
- * - resident: must match the caller's own residentId.
+ * - resident: must match the caller's own resident id.
+ *
+ * A resident is identified by `_id` (equal to the JWT `sub` for both Google-SSO
+ * and self-registered residents); the custom `residentId` field may be unset, so
+ * we accept a match against either.
  */
 export function assertResidentOwnership(
   auth: AuthContext,
-  residentId: mongoose.Types.ObjectId | string
+  resident: { _id?: unknown; residentId?: unknown }
 ): void {
   if (auth.role === 'admin') return;
   if (auth.role === 'official') return; // barangay scope enforced by caller
   // resident: only their own record
-  if (auth.userId !== String(residentId)) {
+  const ownerId = String(resident._id ?? resident.residentId ?? '');
+  if (auth.userId !== ownerId) {
     throw forbiddenError('You can only access your own records.');
   }
 }

@@ -189,8 +189,7 @@ async function seedIncidents(residentMap: Map<string, mongoose.Types.ObjectId>):
 }
 
 async function seedDocumentRequests(
-  residentMap: Map<string, mongoose.Types.ObjectId>,
-  adminMap: Map<string, mongoose.Types.ObjectId>
+  residentMap: Map<string, mongoose.Types.ObjectId>
 ): Promise<void> {
   if (await isSeeded(DocumentRequest)) {
     console.log('Document Requests: already seeded, skipping.');
@@ -215,10 +214,6 @@ async function seedDocumentRequests(
       currentStatus: d.currentStatus,
       expectedCompletionDate: new Date(d.expectedCompletionDate),
       timeline: d.timeline.map((t) => ({ step: t.step, date: new Date(t.date), status: t.status })),
-      paymentStatus: d.paymentStatus,
-      verifiedBy: d.verifiedByKey ? adminMap.get(d.verifiedByKey) : undefined,
-      verifiedAt: d.verifiedAt ? new Date(d.verifiedAt) : undefined,
-      officialReceiptNumber: d.officialReceiptNumber || undefined,
       dateRequested: new Date(d.dateRequested),
     };
   });
@@ -332,7 +327,7 @@ export async function seedInto(): Promise<void> {
     const residentMap = await seedResidents(barangayId);
     await seedAnnouncements(adminMap);
     await seedIncidents(residentMap);
-    await seedDocumentRequests(residentMap, adminMap);
+    await seedDocumentRequests(residentMap);
 
     // Resolve incident _ids for chat sessions.
     const incidentMap = new Map<string, mongoose.Types.ObjectId>();

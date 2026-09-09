@@ -5,19 +5,20 @@ import { ok } from '../../../shared/responses';
 import { notFoundError, forbiddenError } from '../../../shared/errors';
 import { Admin } from '../../../models';
 import { resolveAuthContext, requireAssignedRole } from '../../../shared/authorization';
+import { getCognitoGateway, cognitoReady } from '../../../shared/cognito';
 
 /**
  * Admins — Delete
- * Use-case: delete an admin account. Only the top-tier 'Admin' role may do
- * this, and it cannot delete itself.
- * DELETE /admins/{id} (admin, assignedRole = Admin)
+ * Use-case: delete an admin account. Only the top-tier 'SUPER_ADMIN' role
+ * may do this, and it cannot delete itself.
+ * DELETE /admins/{id} (admin, assignedRole = SUPER_ADMIN)
  */
 export async function deleteAdmin(
   event: APIGatewayProxyEvent,
   _context: Context
 ): Promise<APIGatewayProxyResult> {
   const auth = await resolveAuthContext(event);
-  requireAssignedRole(auth, ['Admin']);
+  requireAssignedRole(auth, ['SUPER_ADMIN']);
 
   const id = parsePathParam(event, 'id');
   await connectToDatabase();
@@ -33,6 +34,17 @@ export async function deleteAdmin(
   }
 
   await admin.deleteOne();
+
+  // Remove the matching pool user so the email can be reused later.
+  if (cognitoReady()) {
+    try {
+      await getCognitoGateway().deleteUser(admin.emailAddress);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[admins/delete] Cognito cleanup failed:', (err as Error)?.message || err);
+    }
+  }
+
   return ok({ deleted: admin.adminId }, 'Admin deleted.');
 }
 

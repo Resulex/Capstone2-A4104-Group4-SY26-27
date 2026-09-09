@@ -132,6 +132,8 @@ export async function googleLoginCallback(
     isNewUser: isNewResident,
     isNewResident,
     profileComplete: resident.isProvisioned,
+    // Whether the resident has already recorded Terms + Data Privacy consent.
+    termsAccepted: Boolean(resident.termsAcceptedAt),
   };
   const serialized = JSON.stringify(payload);
 

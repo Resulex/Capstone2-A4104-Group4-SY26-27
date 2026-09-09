@@ -7,8 +7,6 @@ export type DocumentCurrentStatus =
   | 'Released'
   | 'Rejected';
 
-export type DocumentPaymentStatus = 'Unpaid' | 'Paid Offline';
-
 export interface IApplicantDetails {
   fullName: string;
   contactNumber: string;
@@ -31,10 +29,7 @@ export interface IDocumentRequest extends Document {
   currentStatus: DocumentCurrentStatus;
   expectedCompletionDate: Date;
   timeline: IDocumentTimeline[];
-  paymentStatus: DocumentPaymentStatus;
-  verifiedBy?: mongoose.Types.ObjectId; // ref -> Admin (offline payment verifier)
-  verifiedAt?: Date;
-  officialReceiptNumber?: string; // Manual OR tracking
+  remarks?: string; // Admin note (e.g. approval/rejection remark)
   dateRequested: Date;
   updatedAt: Date;
 }
@@ -77,14 +72,7 @@ const documentRequestSchema = new Schema<IDocumentRequest>(
     },
     expectedCompletionDate: { type: Date, required: true },
     timeline: { type: [timelineSchema], default: [] },
-    paymentStatus: {
-      type: String,
-      enum: ['Unpaid', 'Paid Offline'],
-      default: 'Unpaid',
-    },
-    verifiedBy: { type: Schema.Types.ObjectId, ref: 'Admin' },
-    verifiedAt: { type: Date },
-    officialReceiptNumber: { type: String, trim: true },
+    remarks: { type: String, trim: true },
     dateRequested: { type: Date, required: true, default: Date.now },
   },
   { timestamps: true }
@@ -92,7 +80,6 @@ const documentRequestSchema = new Schema<IDocumentRequest>(
 
 documentRequestSchema.index({ currentStatus: 1 });
 documentRequestSchema.index({ documentType: 1, dateRequested: -1 });
-documentRequestSchema.index({ verifiedBy: 1 });
 
 export const DocumentRequest: Model<IDocumentRequest> =
   (mongoose.models.DocumentRequest as Model<IDocumentRequest>) ||

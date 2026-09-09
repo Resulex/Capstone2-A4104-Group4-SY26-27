@@ -11,6 +11,7 @@ import ListItem from "@mui/material/ListItem";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
+import Badge from "@mui/material/Badge";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import Image from "next/image";
@@ -47,6 +48,10 @@ interface ResidentSidebarProps {
   residentProfile: ResidentProfile | null;
   /** Sign out handler. */
   onLogout: () => void;
+  /** When true, only the "Data Privacy & Terms of Service" item is shown. */
+  legalOnly?: boolean;
+  /** Number of unread chat messages/notifications (red dot on Live Chat). */
+  chatUnread?: number;
 }
 
 interface NavItem {
@@ -91,12 +96,19 @@ export function ResidentSidebar({
   onMobileClose,
   residentProfile,
   onLogout,
+  legalOnly = false,
+  chatUnread = 0,
 }: ResidentSidebarProps) {
   const pathname = usePathname();
 
+  // Before consent is recorded, the only allowed destination is the Terms page.
+  const visibleItems = legalOnly
+    ? NAV_ITEMS.filter((item) => item.href === "/legal")
+    : NAV_ITEMS;
+
   const navList = (
     <List component="nav" aria-label="Resident navigation" sx={{ px: 1, py: 1 }}>
-      {NAV_ITEMS.map((item, index) => {
+      {visibleItems.map((item, index) => {
         const isActive =
           item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
         return (
@@ -132,7 +144,13 @@ export function ResidentSidebar({
                       color: isActive ? "primary.main" : "text.secondary",
                     }}
                   >
-                    {item.icon}
+                    {item.href === "/chat" && chatUnread > 0 ? (
+                      <Badge color="error" variant="dot" overlap="circular">
+                        {item.icon}
+                      </Badge>
+                    ) : (
+                      item.icon
+                    )}
                   </ListItemIcon>
                   {expanded && <ListItemText primary={item.label} />}
                 </ListItemButton>

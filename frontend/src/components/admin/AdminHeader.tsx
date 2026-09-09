@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import AppBar from "@mui/material/AppBar";
 import Badge from "@mui/material/Badge";
 import Box from "@mui/material/Box";
@@ -7,13 +8,19 @@ import IconButton from "@mui/material/IconButton";
 import Toolbar from "@mui/material/Toolbar";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import Popover from "@mui/material/Popover";
+import List from "@mui/material/List";
+import ListItem from "@mui/material/ListItem";
+import ListItemButton from "@mui/material/ListItemButton";
+import ListItemText from "@mui/material/ListItemText";
+import Button from "@mui/material/Button";
 import MenuIcon from "@mui/icons-material/Menu";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import { AccessibilityControls } from "@/components/AccessibilityControls";
 import { WebSocketStatus } from "@/components/admin/WebSocketStatus";
-import { WebSocketStatus as WebSocketStatusValue } from "@/hooks/useWebSocket";
 import { SIDEBAR_WIDTH } from "@/components/admin/AdminSidebar";
+import { NotificationRecord } from "@/lib/admin";
 
 interface AdminHeaderProps {
   /** Whether the desktop drawer is expanded. */
@@ -24,8 +31,16 @@ interface AdminHeaderProps {
   onOpenMobile: () => void;
   /** Number of pending incidents (shown as the notification badge). */
   pendingIncidents: number;
-  /** Current WebSocket lifecycle state. */
-  websocketStatus: WebSocketStatusValue;
+  /** The admin's notifications, newest first. */
+  notifications: NotificationRecord[];
+  /** Count of unread notifications (badge, capped at 9+). */
+  unreadCount: number;
+  /** Mark a single notification as read. */
+  onMarkRead: (id: string) => void;
+  /** Mark all notifications as read. */
+  onMarkAllRead: () => void;
+  /** True when the browser is online AND the WebSocket is connected. */
+  online: boolean;
   /** Page title displayed in the app bar. */
   title: string;
 }
@@ -41,10 +56,20 @@ export function AdminHeader({
   expanded,
   onToggleDrawer,
   onOpenMobile,
-  pendingIncidents,
-  websocketStatus,
+  notifications,
+  unreadCount,
+  onMarkRead,
+  onMarkAllRead,
+  online,
   title,
 }: AdminHeaderProps) {
+  const [bellAnchor, setBellAnchor] = useState<HTMLElement | null>(null);
+  const unread = notifications.filter((n) => !n.isRead);
+
+  const handleOpenBell = (event: React.MouseEvent<HTMLElement>) =>
+    setBellAnchor(event.currentTarget);
+  const handleCloseBell = () => setBellAnchor(null);
+
   return (
     <AppBar
       position="fixed"
@@ -87,23 +112,79 @@ export function AdminHeader({
           <AccessibilityControls />
         </Box>
 
-        <WebSocketStatus status={websocketStatus} />
+        <WebSocketStatus isOnline={online} />
 
         <Tooltip title="Notifications">
           <IconButton
-            aria-label={`Notifications: ${pendingIncidents} pending incidents`}
+            aria-label={`Notifications: ${unreadCount} unread`}
             color="inherit"
+            onClick={handleOpenBell}
           >
             <Badge
-              badgeContent={pendingIncidents}
+              badgeContent={unreadCount}
               color="error"
               overlap="circular"
-              max={99}
+              max={9}
             >
               <NotificationsIcon />
             </Badge>
           </IconButton>
         </Tooltip>
+
+        <Popover
+          open={Boolean(bellAnchor)}
+          anchorEl={bellAnchor}
+          onClose={handleCloseBell}
+          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+          transformOrigin={{ vertical: "top", horizontal: "right" }}
+        >
+          <Box sx={{ width: 340, p: 1.5 }}>
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                mb: 1,
+              }}
+            >
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                Notifications
+              </Typography>
+              {unread.length > 0 && (
+                <Button size="small" onClick={onMarkAllRead}>
+                  Read all
+                </Button>
+              )}
+            </Box>
+
+            {unread.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
+                You&apos;re all caught up.
+              </Typography>
+            ) : (
+              <List dense sx={{ maxHeight: 320, overflowY: "auto" }}>
+                {unread.map((n) => (
+                  <ListItem key={n.notificationId} disablePadding>
+                    <ListItemButton
+                      onClick={() => onMarkRead(n.notificationId)}
+                      sx={{ borderRadius: 1, bgcolor: "action.hover" }}
+                    >
+                      <ListItemText
+                        primary={n.titleText}
+                        secondary={n.messageBody}
+                        primaryTypographyProps={{ fontWeight: 700 }}
+                        secondaryTypographyProps={{
+                          variant: "body2",
+                          noWrap: true,
+                        }}
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                ))}
+              </List>
+            )}
+          </Box>
+        </Popover>
       </Toolbar>
     </AppBar>
   );

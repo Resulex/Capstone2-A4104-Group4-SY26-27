@@ -88,6 +88,17 @@ cp .env.example .env
 | `JWT_SECRET`    | Secret used to sign/verify JWTs        | any long random string |
 | `JWT_EXPIRES_IN`| JWT lifetime (jsonwebtoken format)     | `7d` |
 | `STAGE`         | Deployment stage                       | `dev` |
+| `COGNITO_USER_POOL_ID` | Admin Cognito User Pool id (create in the AWS console — see `docs/COGNITO_AWS_CONSOLE.md`) | `ap-southeast-1_AbCdEf` |
+| `COGNITO_CLIENT_ID`    | Admin Cognito app client id           | `1abcdefg...` |
+| `COGNITO_REGION`       | Region of the user pool               | `ap-southeast-1` |
+| `COGNITO_OFFLINE`      | Use the in-process Cognito stub for local dev (no AWS) | `false` |
+| `COGNITO_PROVISION_PASSWORD` | Initial password `provision:cognito` sets for seed admins | — |
+
+> Admin login uses **AWS Cognito User Pools with software-token MFA (TOTP —
+> Google Authenticator)** — see `docs/ARCHITECTURE.md` §5a and the console
+> walkthrough `docs/COGNITO_AWS_CONSOLE.md`. The legacy custom otplib TOTP
+> code (`shared/totp.ts`, `auth/admin/totp/*`) is deprecated and kept for
+> rollback only.
 
 ## Local Development
 
@@ -97,7 +108,13 @@ Run the API locally with `serverless-offline` (requires `.env` with `MONGODB_URI
 npm run offline
 ```
 
-The API is then served at `http://localhost:3000`. Example warm-up:
+The API is then served at `http://localhost:3000`.
+
+> **Admin login (Cognito):** admin login is backed by AWS Cognito
+> (software-token TOTP = Google Authenticator). For local development without
+> a live pool, set `COGNITO_OFFLINE=true` in `.env` — the backend then verifies
+> admin passwords against Mongo and accepts the dev TOTP code `123456` (see
+> `src/shared/cognito.ts`). Example warm-up:
 
 ```bash
 curl -X POST http://localhost:3000/auth/register \

@@ -1,10 +1,11 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parseBody } from '../../../shared/handler';
+import { withErrorHandling, parseBody, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { created, badRequest } from '../../../shared/responses';
 import { conflictError, badRequestError } from '../../../shared/errors';
 import { Message, ChatSession, Resident, Admin } from '../../../models';
 import { getAuthContext } from '../../../shared/authorization';
+import { sendAdminNotification, sendResidentNotification, residentFullName } from '../../../shared/notifications';
 
 interface CreateMessageBody {
   messageId?: string;
@@ -40,9 +41,9 @@ export async function createMessage(
     throw conflictError('A message with this messageId already exists.');
   }
 
-  const session = await ChatSession.findOne({
-    $or: [{ _id: sessionId }, { sessionId }],
-  });
+  const session = await ChatSession.findOne(
+    buildIdOrCustomIdQuery(sessionId, 'sessionId')
+  );
   if (!session) {
     throw badRequestError('Invalid sessionId.');
   }
@@ -87,6 +88,35 @@ export async function createMessage(
   session.messageCount += 1;
   session.lastActivity = new Date();
   await session.save();
+
+  // Notify the session's assigned admin when a resident replies, over the
+  // real-time channel.
+  if (isUser && session.adminId) {
+    const name = await residentFullName(String(session.residentId));
+    await sendAdminNotification({
+      recipientId: String(session.adminId),
+      category: 'chatMessage',
+      titleText: 'New Chat Reply',
+      messageBody: `${name} replied in live chat: ${messageText}`,
+      referenceUrlId: session.incidentId
+        ? String(session.incidentId)
+        : String(session._id),
+    });
+  }
+
+  // Notify the session's resident when the responder replies, over the
+  // real-time channel.
+  if (!isUser && session.residentId) {
+    await sendResidentNotification({
+      recipientId: String(session.residentId),
+      category: 'chatMessage',
+      titleText: 'New Message from the Barangay',
+      messageBody: `The barangay responded in live chat: ${messageText}`,
+      referenceUrlId: session.incidentId
+        ? String(session.incidentId)
+        : String(session._id),
+    });
+  }
 
   return created(message.toObject(), 'Message sent.');
 }

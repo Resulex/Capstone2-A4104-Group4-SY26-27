@@ -2,49 +2,52 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-l
 import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
-import { unauthorizedError, forbiddenError, serverError } from '../../../shared/errors';
+import {
+  unauthorizedError,
+  forbiddenError,
+  serverError,
+} from '../../../shared/errors';
 import { Admin } from '../../../models';
-import { comparePassword } from '../../../shared/password';
-import { signToken } from '../../../shared/auth';
-import { decryptTotpSecret, assertValidTotp } from '../../../shared/totp';
-
-/** TTL for the short-lived enrollment JWT (defaults to 10 minutes). */
-const ENROLLMENT_JWT_TTL = process.env.TOTP_ENROLLMENT_JWT_TTL || '10m';
+import { getCognitoGateway } from '../../../shared/cognito';
 
 interface AdminLoginBody {
   /** Either `userName` or `emailAddress` — at least one is required. */
   userName?: string;
   emailAddress?: string;
   password?: string;
-  /** TOTP 6-digit code from Google Authenticator. Required when MFA is enrolled. */
-  code?: string;
-  /** One of the backup codes issued at enrollment. */
-  backupCode?: string;
 }
 
 /**
- * Auth — Admin Login
- * Use-case: authenticate an admin via userName/email + password, then step-up
- * with a TOTP code before issuing a full-session JWT.
+ * Auth — Admin Login (step 1: credentials)
+ *
+ * Use-case: verify an admin's password against AWS Cognito. Cognito owns the
+ * credential + software-token (TOTP/Google Authenticator) challenge; the app
+ * keeps its own session JWT, so the API Gateway authorizer / RBAC / resident
+ * flow are untouched.
  *
  * POST /auth/admin/login
- * Body: { userName|emailAddress, password, code?, backupCode? }
+ * Body: { userName|emailAddress, password }
  *
- * Responses (all with HTTP 200 unless otherwise noted):
- * - 200 { data:{ token, user } } — fully authenticated (MFA enrolled + valid code).
- * - 200 { data:{ authenticated:false, needsSetup:true, enrollmentJwt } } —
- *   credentials valid but MFA not yet enrolled; the caller must run TOTP setup.
- * - 200 { data:{ authenticated:false, needsSetup:false } } — credentials valid,
- *   MFA enrolled, but no code/backupCode supplied yet (prompt for the code).
- * - 401 — invalid credentials, or a wrong/invalid authenticator/backup code.
+ * Responses (HTTP 200 unless otherwise noted):
+ * - 200 { data:{ authenticated:false, needsTotp:true, session } } — password
+ *   verified + a TOTP authenticator is enrolled; prompt for the 6-digit code
+ *   and complete via POST /auth/admin/login/mfa.
+ * - 200 { data:{ authenticated:false, needsTotpSetup:true, session } } —
+ *   password verified but no TOTP authenticator yet; run the QR setup
+ *   (POST /auth/admin/login/totp/setup then /totp/verify), then re-login.
+ * - 401 — invalid credentials.
  * - 403 — the admin account is not active.
+ *
+ * The Cognito challenge `session` is an opaque, short-lived string returned
+ * to the client and passed back once in a follow-up call. The Lambda stores
+ * nothing (stateless).
  */
 export async function adminLogin(
   event: APIGatewayProxyEvent,
   _context: Context
 ): Promise<APIGatewayProxyResult> {
   const body = parseBody(event) as AdminLoginBody;
-  const { userName, emailAddress, password, code, backupCode } = body;
+  const { userName, emailAddress, password } = body;
 
   const identifier = (userName?.trim() || emailAddress?.trim() || '').toLowerCase();
   if (!identifier || !password) {
@@ -53,14 +56,14 @@ export async function adminLogin(
 
   await connectToDatabase();
 
-  // passwordHash, totpSecret, and backupCodes all have `select: false`, so
-  // select them explicitly. Match on either the username or email address.
+  // The Mongo Admin is still the profile/role source of truth (accountStatus,
+  // assignedRole). Cognito only authenticates the password + SMS MFA.
   const foundAdmin = await Admin.findOne({
     $or: [
       { userName: userName?.trim() },
       { emailAddress: identifier },
     ],
-  }).select('+passwordHash +totpSecret +backupCodes');
+  });
 
   if (!foundAdmin) {
     throw unauthorizedError('Invalid credentials.');
@@ -70,65 +73,44 @@ export async function adminLogin(
     throw forbiddenError('This admin account is not active.');
   }
 
-  const passwordMatches = await comparePassword(password, foundAdmin.passwordHash);
-  if (!passwordMatches) {
-    throw unauthorizedError('Invalid credentials.');
-  }
+  // Cognito's username for an admin is their emailAddress. Offline mode
+  // verifies the Mongo bcrypt hash and returns the dev TOTP code 123456.
+  const username = foundAdmin.emailAddress;
+  const cognito = getCognitoGateway();
+  const result = await cognito.initiateAuth(username, password);
 
-  // MFA not enrolled yet — issue a short-lived enrollment JWT so the client
-  // can call the JWT-protected TOTP setup/verify endpoints (chicken-and-egg
-  // resolved). This token is NOT a full session token.
-  if (!foundAdmin.totpSecret) {
-    const enrollmentJwt = signToken(
-      String(foundAdmin.id),
-      'admin',
-      ENROLLMENT_JWT_TTL,
-    );
+  // Enrolled → hand the challenge session back; the client asks for the code.
+  if (result.challenge === 'SOFTWARE_TOKEN_MFA') {
     return ok(
-      { authenticated: false, needsSetup: true, enrollmentJwt },
-      'MFA is not enabled. Enroll a TOTP authenticator first.'
+      {
+        authenticated: false,
+        needsTotp: true,
+        session: result.session,
+      },
+      'Enter the 6-digit code from your authenticator app.'
     );
   }
 
-  // MFA enrolled but no code supplied yet — tell the client to prompt for it.
-  if (!code && !backupCode) {
-    return ok({ authenticated: false, needsSetup: false });
-  }
-
-  let mfaOk = false;
-  if (code) {
-    let secret: string;
-    try {
-      secret = decryptTotpSecret(foundAdmin.totpSecret);
-    } catch {
-      throw serverError('Unable to read authenticator configuration.');
-    }
-    await assertValidTotp(code, secret);
-    mfaOk = true;
-  } else if (backupCode && foundAdmin.backupCodes?.length) {
-    // Compare the backup code against the stored bcrypt hashes.
-    const matches = await Promise.all(
-      foundAdmin.backupCodes.map((hash) => comparePassword(backupCode, hash))
+  // Not enrolled → the client runs the TOTP QR setup before signing in.
+  if (result.challenge === 'MFA_SETUP') {
+    return ok(
+      {
+        authenticated: false,
+        needsTotpSetup: true,
+        session: result.session,
+      },
+      'Two-factor authentication is not set up. Scan the QR code to enroll.'
     );
-    mfaOk = matches.some(Boolean);
   }
 
-  if (!mfaOk) {
-    // Wrong code — keep message generic.
-    throw unauthorizedError('Invalid or missing authenticator code.');
-  }
-
-  // Record last login (best-effort; don't fail login on a write error).
-  foundAdmin.lastLogin = new Date();
-  await foundAdmin.save().catch(() => null);
-
-  // `sub` carries the admin's stable internal id (adminId). The authorizer's
-  // loadAdminContext resolves the Admin document via adminId/_id regardless.
-  const token = signToken(String(foundAdmin.id), 'admin');
-
-  return ok(
-    { token, user: foundAdmin.toPublicJSON() },
-    'Admin login successful.'
+  // Fail closed: step 1 must never issue a session token. Every successful
+  // password check is followed by a TOTP challenge — SOFTWARE_TOKEN_MFA when
+  // the admin is enrolled, MFA_SETUP when they still need to scan the QR.
+  // Reaching this point means the Cognito gateway returned no challenge (e.g.
+  // the user pool is not enforcing MFA) — surface an error instead of signing
+  // the admin in without a 6-digit code.
+  throw serverError(
+    'Unexpected authentication state: no multi-factor challenge was returned. Please contact an administrator.'
   );
 }
 

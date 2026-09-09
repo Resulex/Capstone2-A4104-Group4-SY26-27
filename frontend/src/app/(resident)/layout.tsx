@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import Snackbar from "@mui/material/Snackbar";
 import Toolbar from "@mui/material/Toolbar";
+import { SessionTimeoutDialog } from "@/components/shared/SessionTimeoutDialog";
 import { ResidentSidebar } from "@/components/resident/ResidentSidebar";
 import { ResidentHeader } from "@/components/resident/ResidentHeader";
 import { ResidentFooter } from "@/components/resident/ResidentFooter";
@@ -13,7 +16,15 @@ import {
   ResidentDashboardProvider,
   useResidentDashboard,
 } from "@/context/ResidentDashboardContext";
-import { countUnread } from "@/lib/resident";
+import { useIdleSession } from "@/hooks/useIdleSession";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import {
+  NotificationRecord,
+  fetchNotifications,
+  playNotificationSound,
+} from "@/lib/admin";
+import { countUnread, fetchResidentWsToken } from "@/lib/resident";
+import { clearLastActive } from "@/lib/session";
 
 /**
  * Shared shell for the resident section.
@@ -52,9 +63,15 @@ export default function ResidentLayout({
 function ResidentShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { logout } = useAuth();
+  // The dashboard's hero is full-bleed and starts flush under the header, so
+  // the extra top/bottom vertical rhythm is applied only to sub-pages.
+  const isDashboard = pathname === "/";
+  const { isAuthenticated, user, logout } = useAuth();
   const { profile, clearProfile } = useResident();
-  const { data } = useResidentDashboard();
+  const { data, addNotificationLocal } = useResidentDashboard();
+
+  const hasConsented = Boolean(profile?.termsAcceptedAt);
+  const isLegalPage = pathname === "/legal";
 
   const [expanded, setExpanded] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -63,11 +80,102 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
   const handleMobileClose = () => setMobileOpen(false);
   const handleMobileOpen = () => setMobileOpen(true);
 
+  // A resident must accept the Terms + Data Privacy Policy before using the
+  // portal; only `/legal` is reachable until they do.
+  useEffect(() => {
+    if (!hasConsented && !isLegalPage) router.replace("/legal");
+  }, [hasConsented, isLegalPage, router]);
+
   const handleLogout = async () => {
+    clearLastActive("resident");
     clearProfile();
     await logout();
     router.replace("/login");
   };
+
+  // Auto sign-out after 2 hours of inactivity in the resident portal.
+  const { warningVisible, secondsRemaining, staySignedIn } = useIdleSession({
+    role: "resident",
+    enabled: isAuthenticated && user?.role === "resident",
+    onExpire: handleLogout,
+  });
+
+  // ---- Real-time resident notifications -------------------------------
+  const [wsToken, setWsToken] = useState<string | null>(null);
+  const [toast, setToast] = useState<NotificationRecord | null>(null);
+  const seenIdsRef = useRef<Set<string>>(new Set());
+
+  // Keep the "already surfaced" set in sync with the shared snapshot so a
+  // fresh poll/WS event doesn't re-toast an existing notification.
+  useEffect(() => {
+    const ids = new Set<string>();
+    for (const n of data.notifications) {
+      ids.add(n.notificationId ?? n._id ?? "");
+    }
+    seenIdsRef.current = ids;
+  }, [data.notifications]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const token = await fetchResidentWsToken();
+      if (!cancelled) setWsToken(token);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const presentNotification = useCallback(
+    (notification: NotificationRecord) => {
+      const key = notification.notificationId ?? notification._id ?? "";
+      if (!key || seenIdsRef.current.has(key)) return;
+      seenIdsRef.current.add(key);
+      addNotificationLocal(notification);
+      setToast(notification);
+      playNotificationSound();
+    },
+    [addNotificationLocal],
+  );
+
+  const handleSocketMessage = useCallback(
+    (raw: unknown) => {
+      const message = raw as {
+        type?: string;
+        notification?: NotificationRecord;
+      };
+      if (message?.type !== "notification" || !message.notification) return;
+      presentNotification(message.notification);
+    },
+    [presentNotification],
+  );
+
+  const { connectionStatus } = useWebSocket({
+    token: wsToken,
+    onMessage: handleSocketMessage,
+  });
+  void connectionStatus;
+
+  // Polling fallback so residents still receive alerts under `serverless
+  // offline` (no WS endpoint) and immediately after a cold start.
+  useEffect(() => {
+    if (!isAuthenticated || user?.role !== "resident") return;
+    const tick = async () => {
+      const fresh = await fetchNotifications();
+      for (const n of fresh) presentNotification(n);
+    };
+    const timer = window.setInterval(() => void tick(), 8000);
+    return () => window.clearInterval(timer);
+  }, [isAuthenticated, user?.role, presentNotification]);
+
+  // Red dot on the sidebar's Live Chat entry while unread chat replies exist.
+  const unreadChatCount = data.notifications.filter(
+    (n) => n.notificationCategory === "chatMessage" && !n.isRead,
+  ).length;
+
+  // Block navigation into the portal until consent is recorded (the `/legal`
+  // page remains reachable). Render nothing while the redirect is in flight.
+  if (!hasConsented && !isLegalPage) return null;
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
@@ -77,6 +185,8 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
         onMobileClose={handleMobileClose}
         residentProfile={profile}
         onLogout={handleLogout}
+        legalOnly={!hasConsented}
+        chatUnread={unreadChatCount}
       />
 
       <Box
@@ -104,15 +214,47 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
             // fills the column — no extra `calc()` here.
             minWidth: 0,
             bgcolor: "background.default",
-            p: { xs: 0, sm: 3 },
+            // Horizontal gutter on all sizes. On mobile the dashboard hero
+            // opts back out with a negative-margin full-bleed escape.
+            px: { xs: 2, sm: 3 },
+            // Vertical rhythm on sub-pages: breathing room under the header
+            // (xs: 16px) and above the footer (24px). The dashboard hero stays
+            // flush under the header, so it keeps zero top padding on mobile.
+            pt: isDashboard ? { xs: 0, sm: 3 } : { xs: 2, sm: 3 },
+            pb: isDashboard ? { xs: 0, sm: 3 } : { xs: 3, sm: 3 },
           }}
         >
-          <Toolbar />
+          {/* Match the fixed header's toolbar height (64px at every breakpoint)
+              so page content never tucks underneath it on mobile. */}
+          <Toolbar sx={{ minHeight: 64 }} />
           {children}
         </Box>
 
         <ResidentFooter />
       </Box>
+
+      <SessionTimeoutDialog
+        open={warningVisible}
+        secondsRemaining={secondsRemaining}
+        onStay={staySignedIn}
+        onSignOut={handleLogout}
+      />
+
+      <Snackbar
+        open={toast !== null}
+        anchorOrigin={{ vertical: "top", horizontal: "right" }}
+        autoHideDuration={8000}
+        onClose={() => setToast(null)}
+      >
+        <Alert
+          severity="info"
+          variant="filled"
+          onClose={() => setToast(null)}
+          sx={{ width: "100%", maxWidth: 420 }}
+        >
+          <strong>{toast?.titleText}</strong> — {toast?.messageBody}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

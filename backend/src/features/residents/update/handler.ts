@@ -19,6 +19,9 @@ interface UpdateResidentBody {
   password?: string;
   profileImageUrl?: string;
   accountStatus?: 'active' | 'suspended';
+  /** Record Terms + Data Privacy consent (resident self-service only). */
+  acceptTerms?: boolean;
+  termsVersion?: string;
 }
 
 /**
@@ -42,7 +45,7 @@ export async function updateResident(
 
   // Residents may only update their own record.
   if (auth.role === 'resident') {
-    assertResidentOwnership(auth, resident.residentId);
+    assertResidentOwnership(auth, resident);
   }
 
   const body = parseBody(event) as UpdateResidentBody;
@@ -76,6 +79,13 @@ export async function updateResident(
   // Password change hashes the new value.
   if (body.password !== undefined) {
     resident.passwordHash = await hashPassword(body.password);
+  }
+
+  // Record Terms + Data Privacy consent. The timestamp is set server-side so
+  // the client cannot backdate it; consent is a personal, resident-only action.
+  if (body.acceptTerms === true && auth.role === 'resident') {
+    resident.termsAcceptedAt = new Date();
+    if (body.termsVersion) resident.termsVersion = body.termsVersion;
   }
 
   await resident.save();

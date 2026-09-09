@@ -3,7 +3,8 @@ import mongoose, { Schema, type Document, type Model } from 'mongoose';
 export type NotificationCategory =
   | 'incidentAlert'
   | 'documentUpdate'
-  | 'systemMessage';
+  | 'systemMessage'
+  | 'chatMessage';
 
 export interface INotification extends Document {
   notificationId: string;
@@ -26,7 +27,7 @@ const notificationSchema = new Schema<INotification>(
     },
     notificationCategory: {
       type: String,
-      enum: ['incidentAlert', 'documentUpdate', 'systemMessage'],
+      enum: ['incidentAlert', 'documentUpdate', 'systemMessage', 'chatMessage'],
       required: true,
     },
     titleText: { type: String, required: true, trim: true },

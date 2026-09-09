@@ -39,6 +39,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   incidentAlert: "Incident Alert",
   documentUpdate: "Document Update",
   systemMessage: "System Message",
+  chatMessage: "Chat Reply",
 };
 
 /** Color mapping for a notification category. */

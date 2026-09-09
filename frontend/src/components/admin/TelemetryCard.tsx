@@ -1,6 +1,7 @@
 "use client";
 
 import { ReactNode } from "react";
+import Link from "next/link";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Box from "@mui/material/Box";
@@ -15,19 +16,23 @@ interface TelemetryCardProps {
   icon: ReactNode;
   /** Accent color key (used as the badge background). */
   color: string;
+  /** Optional route opened when the card is clicked (acts as a quick link). */
+  href?: string;
 }
 
 /**
  * Reusable telemetry card showing a single dashboard metric with an icon
- * badge, a large value, and a descriptive label.
+ * badge, a large value, and a descriptive label. When `href` is provided, the
+ * whole card is a clickable link to that route.
  */
 export function TelemetryCard({
   title,
   value,
   icon,
   color,
+  href,
 }: TelemetryCardProps) {
-  return (
+  const card = (
     <Card
       variant="outlined"
       sx={{
@@ -70,5 +75,17 @@ export function TelemetryCard({
         </Typography>
       </CardContent>
     </Card>
+  );
+
+  if (!href) return card;
+
+  return (
+    <Link
+      href={href}
+      aria-label={`View ${title}`}
+      style={{ display: "block", height: "100%", color: "inherit", textDecoration: "none" }}
+    >
+      {card}
+    </Link>
   );
 }

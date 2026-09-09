@@ -54,7 +54,7 @@ async function forward(request: NextRequest, context: RouteContext, method: stri
   } catch (error) {
     return NextResponse.json(
       { success: false, message: "Backend unreachable.", details: String(error) },
-      { status: 502 },
+      { status: 502, headers: { "Cache-Control": "no-store" } },
     );
   }
 
@@ -65,9 +65,12 @@ async function forward(request: NextRequest, context: RouteContext, method: stri
     body = null;
   }
 
+  // Mark responses no-store so neither the browser cache nor the CDN (CloudFront
+  // on Amplify, which uses a default TTL when no Cache-Control is present) can
+  // serve a stale user-scoped payload.
   return NextResponse.json(
     body ?? { success: false, message: "Empty response from backend." },
-    { status: upstream.status },
+    { status: upstream.status, headers: { "Cache-Control": "no-store" } },
   );
 }
 

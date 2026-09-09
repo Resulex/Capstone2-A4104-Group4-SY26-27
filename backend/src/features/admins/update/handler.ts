@@ -1,11 +1,12 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
-import { ok } from '../../../shared/responses';
+import { ok, badRequest } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { hashPassword } from '../../../shared/password';
 import { Admin } from '../../../models';
 import { resolveAuthContext, requireAssignedRole } from '../../../shared/authorization';
+import { getCognitoGateway, cognitoReady } from '../../../shared/cognito';
 
 interface UpdateAdminBody {
   firstName?: string;
@@ -14,14 +15,15 @@ interface UpdateAdminBody {
   userName?: string;
   emailAddress?: string;
   password?: string;
-  assignedRole?: 'Admin' | 'Moderator' | 'Content Admin';
+  phoneNumber?: string;
+  assignedRole?: 'SUPER_ADMIN' | 'OPERATIONS_CLERK' | 'INFO_OFFICER';
   accountStatus?: 'active' | 'suspended' | 'deactivated';
 }
 
 /**
  * Admins — Update
  * Use-case: update an admin account. Role/status changes require the top-tier
- * 'Admin' assigned role; basic profile edits allow any admin.
+ * 'SUPER_ADMIN' assigned role; basic profile edits allow any admin.
  * PATCH /admins/{id} (admin)
  */
 export async function updateAdmin(
@@ -48,7 +50,19 @@ export async function updateAdmin(
     body.userName !== undefined ||
     body.emailAddress !== undefined;
   if (changesRoleOrStatus) {
-    requireAssignedRole(auth, ['Admin']);
+    requireAssignedRole(auth, ['SUPER_ADMIN']);
+  }
+
+  // Email is the Cognito sign-in name for provisioned admins. Changing it
+  // in-place would silently break their pool login, so block it (a top-tier
+  // Admin can delete + recreate instead).
+  if (body.emailAddress !== undefined) {
+    const newEmail = body.emailAddress.toLowerCase();
+    if (admin.cognitoSub && newEmail !== admin.emailAddress) {
+      throw badRequest(
+        'Email is the Cognito sign-in name and cannot be changed on a provisioned account. Delete and recreate the admin instead.'
+      );
+    }
   }
 
   if (body.firstName !== undefined) admin.firstName = body.firstName;
@@ -56,6 +70,7 @@ export async function updateAdmin(
   if (body.middleName !== undefined) admin.middleName = body.middleName;
   if (body.userName !== undefined) admin.userName = body.userName;
   if (body.emailAddress !== undefined) admin.emailAddress = body.emailAddress.toLowerCase();
+  if (body.phoneNumber !== undefined) admin.phoneNumber = body.phoneNumber.trim();
   if (body.assignedRole !== undefined) admin.assignedRole = body.assignedRole;
   if (body.accountStatus !== undefined) admin.accountStatus = body.accountStatus;
   if (body.password !== undefined) {
@@ -63,6 +78,27 @@ export async function updateAdmin(
   }
 
   await admin.save();
+
+  // Sync password / status to the Cognito pool. Best-effort and non-fatal:
+  // Mongo stays the profile source of truth, and the provision script can
+  // reconcile any drift. (phoneNumber is stored in Mongo only — software-token
+  // MFA does not need it in the pool.)
+  if (cognitoReady()) {
+    const cognito = getCognitoGateway();
+    const username = admin.emailAddress;
+    try {
+      if (body.password !== undefined) {
+        await cognito.setPassword(username, body.password);
+      }
+      if (body.accountStatus !== undefined) {
+        await cognito.setAccountStatus(username, admin.accountStatus);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[admins/update] Cognito sync failed:', (err as Error)?.message || err);
+    }
+  }
+
   return ok(admin.toPublicJSON(), 'Admin updated.');
 }
 

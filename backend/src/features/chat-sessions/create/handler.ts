@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
 import { connectToDatabase } from '../../../config/db';
-import { withErrorHandling, parseBody } from '../../../shared/handler';
+import { withErrorHandling, parseBody, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { created, badRequest } from '../../../shared/responses';
 import { conflictError, badRequestError } from '../../../shared/errors';
 import { ChatSession, IncidentReport, Resident, Admin } from '../../../models';
@@ -55,16 +55,16 @@ export async function createChatSession(
     throw conflictError('A chat session with this sessionId already exists.');
   }
 
-  const incident = await IncidentReport.findOne({
-    $or: [{ _id: incidentId }, { incidentId }],
-  });
+  const incident = await IncidentReport.findOne(
+    buildIdOrCustomIdQuery(incidentId, 'incidentId')
+  );
   if (!incident) {
     throw badRequestError('Invalid incidentId.');
   }
 
-  const resident = await Resident.findOne({
-    $or: [{ _id: residentId }, { residentId }],
-  });
+  const resident = await Resident.findOne(
+    buildIdOrCustomIdQuery(residentId, 'residentId')
+  );
   if (!resident) {
     throw badRequestError('Invalid residentId.');
   }
@@ -76,9 +76,11 @@ export async function createChatSession(
     responderAdmin = auth.userId;
   }
 
-  const admin = await Admin.findOne({
-    $or: [{ _id: responderAdmin }, { adminId: responderAdmin }],
-  });
+  const admin = responderAdmin
+    ? await Admin.findOne(
+        buildIdOrCustomIdQuery(responderAdmin, 'adminId')
+      )
+    : null;
   if (!admin) {
     throw badRequestError('Invalid adminId.');
   }

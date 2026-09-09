@@ -141,7 +141,7 @@ export default function ChatThreadPage() {
               message={message.messageText}
               timestamp={message.sentTimestamp ?? message.createdAt}
               isUser={Boolean(message.isUser)}
-              label={message.isUser ? "You" : "Responder"}
+              urgency={Boolean(message.urgencyFlag)}
             />
           ))
         )}

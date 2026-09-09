@@ -8,12 +8,15 @@ import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import Link from "next/link";
 import DescriptionIcon from "@mui/icons-material/Description";
 import { DocumentRequestRecord } from "@/lib/telemetry";
 
 interface RecentDocumentsProps {
   /** Most recently requested documents, newest first. */
   documents: DocumentRequestRecord[];
+  /** Optional route opened when a row is clicked (quick link). */
+  href?: string;
 }
 
 /** Color mapping for a document request's current status. */
@@ -43,8 +46,9 @@ function formatDate(iso: string): string {
 
 /**
  * Recent Documents queue — a compact list of the latest document requests.
+ * When `href` is supplied, each row becomes a clickable quick link to it.
  */
-export function RecentDocuments({ documents }: RecentDocumentsProps) {
+export function RecentDocuments({ documents, href }: RecentDocumentsProps) {
   return (
     <Card variant="outlined" sx={{ borderRadius: 3, height: "100%" }}>
       <CardContent sx={{ p: 3 }}>
@@ -61,38 +65,63 @@ export function RecentDocuments({ documents }: RecentDocumentsProps) {
           </Typography>
         ) : (
           <Stack divider={<Divider flexItem />} spacing={1.5}>
-            {documents.map((doc) => (
-              <Stack key={doc.requestId} direction="row" alignItems="center" spacing={2}>
-                <Avatar
-                  sx={{ width: 36, height: 36, bgcolor: "secondary.main", fontSize: 14 }}
-                >
-                  {doc.documentType.slice(0, 1).toUpperCase()}
-                </Avatar>
-                <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                  <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
-                    {doc.applicantDetails?.fullName ?? "Applicant"}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" noWrap>
-                    {doc.documentType}
-                  </Typography>
-                </Box>
-                <Box sx={{ textAlign: "right" }}>
-                  <Chip
-                    label={doc.currentStatus}
-                    size="small"
-                    color={statusColor(doc.currentStatus)}
-                    variant="outlined"
-                  />
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ display: "block", mt: 0.5 }}
+            {documents.map((doc) => {
+              const inner = (
+                <>
+                  <Avatar
+                    sx={{ width: 36, height: 36, bgcolor: "secondary.main", fontSize: 14 }}
                   >
-                    {formatDate(doc.dateRequested)}
-                  </Typography>
-                </Box>
-              </Stack>
-            ))}
+                    {doc.documentType.slice(0, 1).toUpperCase()}
+                  </Avatar>
+                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                    <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
+                      {doc.applicantDetails?.fullName ?? "Applicant"}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" noWrap>
+                      {doc.documentType}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: "right" }}>
+                    <Chip
+                      label={doc.currentStatus}
+                      size="small"
+                      color={statusColor(doc.currentStatus)}
+                      variant="outlined"
+                    />
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mt: 0.5 }}
+                    >
+                      {formatDate(doc.dateRequested)}
+                    </Typography>
+                  </Box>
+                </>
+              );
+
+              return href ? (
+                <Stack
+                  key={doc.requestId}
+                  component={Link}
+                  href={href}
+                  direction="row"
+                  alignItems="center"
+                  spacing={2}
+                  sx={{
+                    borderRadius: 1,
+                    textDecoration: "none",
+                    color: "inherit",
+                    "&:hover": { bgcolor: "action.hover" },
+                  }}
+                >
+                  {inner}
+                </Stack>
+              ) : (
+                <Stack key={doc.requestId} direction="row" alignItems="center" spacing={2}>
+                  {inner}
+                </Stack>
+              );
+            })}
           </Stack>
         )}
       </CardContent>
