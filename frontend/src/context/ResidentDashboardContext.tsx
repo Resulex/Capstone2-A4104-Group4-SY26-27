@@ -6,13 +6,21 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 import {
   ResidentDashboardData,
   fetchResidentDashboardData,
 } from "@/lib/resident";
-import type { DocumentQueueRecord, NotificationRecord } from "@/lib/admin";
+import {
+  applyReadState,
+  collectUnreadReferences,
+  markAllNotificationsRead,
+  markNotificationsByReference,
+  type DocumentQueueRecord,
+  type NotificationRecord,
+} from "@/lib/admin";
 
 interface ResidentDashboardContextValue {
   /** Aggregated resident dashboard data (empty arrays while loading). */
@@ -29,6 +37,19 @@ interface ResidentDashboardContextValue {
   setNotificationReadLocal: (id: string, isRead: boolean) => void;
   /** Optimistically prepend a real-time notification to shared state. */
   addNotificationLocal: (notification: NotificationRecord) => void;
+  /**
+   * Unread *records* per area, keyed by the notification's `referenceUrlId`.
+   * A record with several unread notifications is counted once, so each set's
+   * `size` is the number of rows the matching list should mark as new.
+   */
+  unreadIncidentIds: Set<string>;
+  unreadDocumentIds: Set<string>;
+  unreadChatKeys: Set<string>;
+  /** Mark every notification behind the given records read/unread. */
+  markRecordsRead: (referenceUrlIds: string[]) => void;
+  markRecordsUnread: (referenceUrlIds: string[]) => void;
+  /** Mark every one of the resident's notifications read (bulk action). */
+  markAllRead: () => void;
 }
 
 const ResidentDashboardContext = createContext<ResidentDashboardContextValue | null>(
@@ -112,6 +133,47 @@ export function ResidentDashboardProvider({ children }: { children: ReactNode })
     });
   }, []);
 
+  const unreadIncidentIds = useMemo(
+    () => collectUnreadReferences(data.notifications, "incidentAlert"),
+    [data.notifications],
+  );
+  const unreadDocumentIds = useMemo(
+    () => collectUnreadReferences(data.notifications, "documentUpdate"),
+    [data.notifications],
+  );
+  const unreadChatKeys = useMemo(
+    () => collectUnreadReferences(data.notifications, "chatMessage"),
+    [data.notifications],
+  );
+
+  const markRecordsRead = useCallback((referenceUrlIds: string[]) => {
+    if (referenceUrlIds.length === 0) return;
+    // Optimistic: flip locally so the card, list and badge react immediately,
+    // then persist every notification behind those records in one request.
+    setData((prev) => ({
+      ...prev,
+      notifications: applyReadState(prev.notifications, referenceUrlIds, true),
+    }));
+    void markNotificationsByReference(referenceUrlIds, true);
+  }, []);
+
+  const markRecordsUnread = useCallback((referenceUrlIds: string[]) => {
+    if (referenceUrlIds.length === 0) return;
+    setData((prev) => ({
+      ...prev,
+      notifications: applyReadState(prev.notifications, referenceUrlIds, false),
+    }));
+    void markNotificationsByReference(referenceUrlIds, false);
+  }, []);
+
+  const markAllRead = useCallback(() => {
+    setData((prev) => ({
+      ...prev,
+      notifications: prev.notifications.map((n) => ({ ...n, isRead: true })),
+    }));
+    void markAllNotificationsRead();
+  }, []);
+
   const value: ResidentDashboardContextValue = {
     data,
     isLoading,
@@ -120,6 +182,12 @@ export function ResidentDashboardProvider({ children }: { children: ReactNode })
     addDocumentRequestLocal,
     setNotificationReadLocal,
     addNotificationLocal,
+    unreadIncidentIds,
+    unreadDocumentIds,
+    unreadChatKeys,
+    markRecordsRead,
+    markRecordsUnread,
+    markAllRead,
   };
 
   return (

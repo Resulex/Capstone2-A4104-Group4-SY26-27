@@ -6,6 +6,7 @@ import {
   IncidentRecord,
   NotificationRecord,
   OfficialRecord,
+  TimelineEntry,
   fetchAnnouncements,
   fetchChatSessions,
   fetchDocumentRequests,
@@ -210,7 +211,7 @@ export async function createIncidentReport(body: {
  */
 export interface DocumentRequestDetail extends DocumentQueueRecord {
   residentId?: string;
-  timeline?: { step?: string; date?: string; status?: string }[];
+  timeline?: TimelineEntry[];
 }
 
 /** Fetch a single document request (own record only). */

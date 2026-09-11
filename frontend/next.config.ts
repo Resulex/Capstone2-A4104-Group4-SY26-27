@@ -13,13 +13,15 @@ const API_BACKEND_URL = process.env.API_BACKEND_URL ?? "http://localhost:3000";
 const API_BACKEND_STAGE = process.env.API_BACKEND_STAGE ?? "dev";
 
 /**
- * Base URL of the backend WebSocket server. Override via the
- * API_WEBSOCKET_URL env var; it runs on ws://localhost:3002.
+ * Base URL of the backend WebSocket server. Must match
+ * `custom.serverless-offline.websocketPort` in backend/serverless.yml
+ * (`npm --prefix backend run verify:routes` fails on a mismatch).
  */
-const API_WEBSOCKET_URL = process.env.API_WEBSOCKET_URL ?? "ws://localhost:3002";
+const API_WEBSOCKET_URL = process.env.API_WEBSOCKET_URL ?? "ws://localhost:3001";
 
-// Referenced here so the env key is validated/available at build time and
-// documented for future WebSocket wiring (see src/lib/api.ts).
+// The browser bundle reads NEXT_PUBLIC_WEBSOCKET_URL directly (see
+// src/hooks/useWebSocket.ts); referenced here so both keys stay documented and
+// visible to the Next.js env loader.
 void API_WEBSOCKET_URL;
 
 const nextConfig: NextConfig = {

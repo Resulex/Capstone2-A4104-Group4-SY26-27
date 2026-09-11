@@ -15,6 +15,8 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import { AccessibilityControls } from "@/components/AccessibilityControls";
 import { useResident } from "@/context/ResidentContext";
 import { getResidentInitials } from "@/lib/resident";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getShellColors } from "@/theme/theme";
 import {
   RESIDENT_SIDEBAR_WIDTH,
   RESIDENT_SIDEBAR_WIDTH_COLLAPSED,

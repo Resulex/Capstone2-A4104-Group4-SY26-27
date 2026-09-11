@@ -196,6 +196,36 @@ store). Step 1 is **fail-closed**: it never issues a session JWT. If Cognito
 returns tokens without an MFA challenge (i.e. the pool is not enforcing MFA),
 the login returns an error instead of signing the admin in.
 
+All four endpoints (`auth/admin/login`, `auth/admin/login/mfa`,
+`auth/admin/login/totp/setup`, `auth/admin/login/totp/verify`) are public — the
+short-lived challenge `session` stands in for the password — and are registered
+in `serverless.yml`. They are asserted by `npm run verify:routes`, which fails
+the build/deploy if a route is renamed, deleted, or points at a missing handler
+export.
+
+Password reset (also public, also asserted by `verify:routes`) is **link-based,
+emailed by Amazon SES** — the admin never types a code:
+
+- `POST /auth/admin/forgot-password` `{ email }` — mints a 32-byte random token,
+  stores **only its SHA-256 hash** plus a 60-minute expiry on the Admin document
+  (`shared/reset-token.ts`), and emails `/admin/reset-password?token=…&email=…`
+  through SES (`shared/email.ts`, From `SES_FROM_ADDRESS`). Cognito's
+  `ForgotPassword` and its message templates are deliberately bypassed, so the
+  copy is version-controlled and expiry is ours to control. A fresh request
+  overwrites the hash, invalidating any earlier link. The response is always the
+  same generic message so the endpoint cannot probe which emails exist; a
+  missing, non-`active`, or pool-unlinked admin is skipped and logged instead,
+  and diagnostics go to CloudWatch rather than the response.
+- `POST /auth/admin/forgot-password/confirm` `{ token, newPassword }` — looks the
+  admin up by token hash and rejects a missing or expired token. The password is
+  checked against the pool policy locally first (`shared/password-policy.ts`),
+  then set via `AdminSetUserPassword` (Cognito still owns the credential) with
+  the bcrypt hash mirrored into Mongo for the offline stub, and the token is
+  burned. The reset page renders only the two password fields; a visit without a
+  token is treated as an invalid link. Resetting the password does not touch TOTP
+  enrollment — an admin who also lost their authenticator still needs
+  `npm run reset:mfa`.
+
 Implementation notes:
 
 - Pool configuration (console): email as the username, software-token MFA
@@ -203,9 +233,16 @@ Implementation notes:
   `ALLOW_ADMIN_USER_PASSWORD_AUTH` and no client secret. See
   `docs/COGNITO_AWS_CONSOLE.md` for the click-path.
 - `src/scripts/provision-cognito-admins.ts` (`npm run provision:cognito`)
-  creates pool users for Mongo admins (permanent password) and stores
-  `cognitoSub` on the `Admin` doc. `POST /admins` provisions new admins
-  automatically; admin create/update/delete stay in sync.
+  creates pool users for Mongo admins and stores `cognitoSub` on the `Admin` doc;
+  it lets Cognito send the invitation. `POST /admins` provisions new admins
+  automatically, suppresses Cognito's invitation only when SES is configured, and
+  emails the temporary password itself through SES (`shared/email.ts`) — falling
+  back to Cognito's invitation (`resendInvite`) if that send fails, and reporting
+  the outcome as `inviteDelivery`. The pool leaves the user in
+  FORCE_CHANGE_PASSWORD, so the first sign-in returns `NEW_PASSWORD_REQUIRED` and
+  must set a new password before MFA enrollment
+  (`shared/cognito.ts` mirrors that as `Admin.mustChangePassword` for the offline
+  stub). Admin create/update/delete stay in sync.
 - MFA is not set up during provisioning — because the pool requires it, each
   admin enrolls a TOTP authenticator on their first sign-in.
 - The legacy custom otplib TOTP code (`shared/totp.ts`, the `auth/admin/totp/*`
@@ -375,11 +412,17 @@ Follow this exact sequence when extending the system.
    - export `export const handler = withErrorHandling(<fn>)`.
 4. **Route**: declare the function in `serverless.yml` under `functions:`,
    following the `<feature>-<use-case>` naming and the event mapping in §6.
-   Add an `authorizer` block if the endpoint must be authenticated.
+   Add an `authorizer` block if the endpoint must be authenticated. Route
+   changes are plain text, so a dropped block silently 404s at runtime —
+   `npm run verify:routes` (run by the `prebuild`/`predeploy` hooks) is the
+   safety net; and remember `serverless-offline` needs a **full restart** to
+   pick up a changed route table.
 5. **Environment**: add any new variables to `.env.example` and to
    `serverless.yml` → `provider.environment`.
-6. **Verify**: `npm run typecheck`, then `npm run build`, then optionally
-   `npm run offline` to smoke-test the new endpoint.
+6. **Verify**: `npm run verify:routes` (route parity guard — add the new route
+   to `REQUIRED_ROUTES` in `scripts/verify-routes.mjs` when it is part of the
+   auth surface), then `npm run typecheck`, then `npm run build`, then
+   optionally `npm run offline` to smoke-test the new endpoint.
 
 ### Rules of thumb
 

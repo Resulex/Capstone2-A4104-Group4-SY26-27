@@ -39,7 +39,9 @@ function priorityColor(priority: string) {
 
 /** Color mapping for incident status. */
 function statusColor(status: string) {
-  return status === "Responding" ? ("info" as const) : ("warning" as const);
+  if (status === "Responding") return "info" as const;
+  if (status === "Duplicate") return "default" as const;
+  return "warning" as const;
 }
 
 /**

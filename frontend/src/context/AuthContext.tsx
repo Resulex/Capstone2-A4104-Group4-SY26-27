@@ -7,15 +7,43 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
-import { fetchJson, getJwt } from "@/lib/api";
+import { ApiError, fetchJson, getJwt } from "@/lib/api";
 
 export interface AuthUser {
   /** Authenticator app / email subject, email, or display name when known. */
   name?: string;
-  /** Whether this user is an admin or a resident. */
-  role: "admin" | "resident";
+  /**
+   * Role from the server-verified session. `official` is a real backend role
+   * (`User.role`) that has no portal yet — it is surfaced as-is so the shells
+   * can tell it apart from a resident instead of silently treating it as one.
+   */
+  role: "admin" | "resident" | "official";
+  /**
+   * Server-verified timestamp of the resident's Terms + Data Privacy consent
+   * (`null` when not yet consented, or for non-residents). Comes from
+   * `/api/auth/me`, which asks the backend — never from a cached profile.
+   */
+  termsAcceptedAt?: string | null;
+}
+
+/** Shape returned by the `/api/auth/me` route handler. */
+interface SessionPayload {
+  authenticated: boolean;
+  role?: string | null;
+  termsAcceptedAt?: string | null;
+}
+
+/** Roles the app knows how to route. Anything else is not a usable session. */
+const KNOWN_ROLES = ["admin", "resident", "official"] as const;
+
+function toKnownRole(value: unknown): AuthUser["role"] | null {
+  return typeof value === "string" &&
+    (KNOWN_ROLES as readonly string[]).includes(value)
+    ? (value as AuthUser["role"])
+    : null;
 }
 
 export interface AuthContextValue {
@@ -26,9 +54,15 @@ export interface AuthContextValue {
   user: AuthUser | null;
   /**
    * Store a backend JWT in the httpOnly cookie (via the server callback
-   * route). Returns the stored user.
+   * route) and refresh the session. Returns the stored user.
    */
-  setToken: (token: string, role: "admin" | "resident") => Promise<AuthUser>;
+  setToken: (token: string, role: AuthUser["role"]) => Promise<AuthUser>;
+  /**
+   * Re-read the session (role + server-verified consent) from `/api/auth/me`.
+   * Call after accepting the Terms so the resident gate lifts immediately.
+   * Returns the refreshed user, or `null` when the session is gone.
+   */
+  refreshSession: () => Promise<AuthUser | null>;
   /** Clear the session cookie. */
   logout: () => Promise<void>;
 }
@@ -64,29 +98,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
 
+  /** Mirrors `user` so callbacks can read it without gaining a dependency. */
+  const userRef = useRef<AuthUser | null>(null);
+
+  const applyUser = useCallback((next: AuthUser | null) => {
+    userRef.current = next;
+    setUser(next);
+  }, []);
+
+  /**
+   * Read the session (role + server-verified consent) from `/api/auth/me`.
+   * Returns the resulting user (or `null` when unauthenticated) so callers can
+   * verify that a state change — e.g. accepting the Terms — actually landed.
+   */
+  const loadSession = useCallback(async (): Promise<AuthUser | null> => {
+    let res: SessionPayload;
+    try {
+      res = await fetchJson<SessionPayload>("/api/auth/me");
+    } catch (error) {
+      // A 502 means the backend could not be reached, NOT that the session is
+      // invalid. Keep the session the user already has instead of bouncing
+      // them to the login page over an outage.
+      if (error instanceof ApiError && error.status === 502) {
+        return userRef.current;
+      }
+      throw error;
+    }
+
+    if (!res.authenticated) {
+      setIsAuthenticated(false);
+      applyUser(null);
+      return null;
+    }
+
+    const role = toKnownRole(res.role);
+    if (!role) {
+      // A verified token whose role we cannot route is treated as no session.
+      setIsAuthenticated(false);
+      applyUser(null);
+      return null;
+    }
+
+    setIsAuthenticated(true);
+    const nextUser: AuthUser = {
+      role,
+      termsAcceptedAt: res.termsAcceptedAt ?? null,
+    };
+    applyUser(nextUser);
+    return nextUser;
+  }, [applyUser]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetchJson<{
-          authenticated: boolean;
-          role?: string | null;
-        }>("/api/auth/me");
-        if (cancelled) return;
-
-        if (!res.authenticated) {
-          setIsAuthenticated(false);
-          setUser(null);
-          return;
-        }
-
-        const role = res.role === "admin" || res.role === "resident"
-          ? res.role
-          : null;
-        setIsAuthenticated(true);
-        setUser(role ? { role } : null);
+        await loadSession();
       } catch {
-        if (!cancelled) setIsAuthenticated(false);
+        if (!cancelled) {
+          setIsAuthenticated(false);
+          applyUser(null);
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -94,10 +165,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadSession, applyUser]);
 
   const setToken = useCallback(
-    async (token: string, role: "admin" | "resident"): Promise<AuthUser> => {
+    async (token: string, role: AuthUser["role"]): Promise<AuthUser> => {
       await fetchJson<{ ok: boolean }>("/api/auth/callback", {
         method: "POST",
         body: JSON.stringify({ token }),
@@ -107,21 +178,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         name: extractName(decodeJwtPayload(token)),
       };
       setIsAuthenticated(true);
-      setUser(nextUser);
+      applyUser(nextUser);
+
+      // Pull the server-verified consent so the resident gate never trusts a
+      // client-cached value. Failure is non-fatal: `termsAcceptedAt` stays
+      // unset and the gate fails closed to `/legal`.
+      try {
+        await loadSession();
+      } catch {
+        // Keep the optimistic user set above.
+      }
       return nextUser;
     },
-    [],
+    [loadSession, applyUser],
   );
 
   const logout = useCallback(async () => {
     await fetchJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
     setIsAuthenticated(false);
-    setUser(null);
-  }, []);
+    applyUser(null);
+  }, [applyUser]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ isAuthenticated, isLoading, user, setToken, logout }),
-    [isAuthenticated, isLoading, user, setToken, logout],
+    () => ({
+      isAuthenticated,
+      isLoading,
+      user,
+      setToken,
+      refreshSession: loadSession,
+      logout,
+    }),
+    [isAuthenticated, isLoading, user, setToken, loadSession, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

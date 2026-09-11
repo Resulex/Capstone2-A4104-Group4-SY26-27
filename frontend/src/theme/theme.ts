@@ -5,13 +5,17 @@ import { createTheme, Theme, ThemeOptions } from "@mui/material/styles";
 /**
  * Typographic scaling options exposed by the accessibility theme context.
  *
+ * - `"xs"`      → −25% base size (12px) for compact/dense reading.
+ * - `"small"`   → −12.5% base size (14px).
  * - `"default"` → standard Material Design body size (1rem / 16px).
  * - `"large"`   → +25% base size for low-vision / readability support.
  * - `"xl"`      → +50% base size (extra-large).
+ * - `"xxl"`     → +100% base size (extra-extra-large).
  */
-export type FontScale = "small" | "default" | "large" | "xl" | "xxl";
+export type FontScale = "xs" | "small" | "default" | "large" | "xl" | "xxl";
 
 export const FONT_SCALE_OPTIONS: FontScale[] = [
+  "xs",
   "small",
   "default",
   "large",
@@ -21,6 +25,7 @@ export const FONT_SCALE_OPTIONS: FontScale[] = [
 
 /** Maps each font-scale option to a multiplier applied to the root font size. */
 const FONT_SCALE_MULTIPLIERS: Record<FontScale, number> = {
+  xs: 0.75,     // 12px
   small: 0.875, // 14px
   default: 1,   // 16px
   large: 1.25,  // 20px
@@ -45,23 +50,26 @@ const CIVIC_SECONDARY = {
 };
 
 /**
- * App-shell chrome tokens (headers + sidebars) — single source of truth.
- *
- * Light civic washes for the surfaces, with text that is a *tonal dark* of the
- * surface it sits on instead of neutral black: the soft blue header gets deep
- * civic blue, the near-neutral sidebar gets dark slate. Both text values
- * already exist in the palette above, so nothing new is invented here.
+ * App-shell surface tints — a light primary wash for the headers and an even
+ * lighter, near-neutral wash for the sidebars. Both keep the shell text well
+ * above the WCAG AA 4.5:1 contrast ratio.
  */
 const SHELL_HEADER = "#E8F1FA";
 const SHELL_SIDEBAR = "#F4F8FC";
-const SHELL_HEADER_TEXT = "#083C6B";
-const SHELL_SIDEBAR_TEXT = "#1B2733";
 
 /**
- * Resolve the app-shell colours for the current accessibility setting.
+ * Primary shell text colors — a darker shade of each surface's own hue rather
+ * than neutral black, so the text sits tonally with its background.
+ */
+const SHELL_HEADER_TEXT = "#083C6B"; // deep civic blue (families with #E8F1FA)
+const SHELL_SIDEBAR_TEXT = "#1B2733"; // dark slate (families with #F4F8FC)
+
+/**
+ * Resolves the app-shell surface colors for the current accessibility mode.
  *
- * High-contrast mode drops the tints for plain white surfaces and pure black
- * text — the washes are decorative, and every extra tint costs contrast.
+ * High-contrast mode falls back to plain white so the high-contrast palette
+ * (yellow accent / black text) stays the dominant, maximum-legibility
+ * treatment instead of competing with a decorative tint.
  */
 export function getShellColors(highContrast: boolean): {
   header: string;
@@ -69,20 +77,54 @@ export function getShellColors(highContrast: boolean): {
   headerText: string;
   sidebarText: string;
 } {
-  if (highContrast) {
-    return {
-      header: "#FFFFFF",
-      sidebar: "#FFFFFF",
-      headerText: "#000000",
-      sidebarText: "#000000",
-    };
-  }
-  return {
-    header: SHELL_HEADER,
-    sidebar: SHELL_SIDEBAR,
-    headerText: SHELL_HEADER_TEXT,
-    sidebarText: SHELL_SIDEBAR_TEXT,
-  };
+  return highContrast
+    ? {
+        header: "#FFFFFF",
+        sidebar: "#FFFFFF",
+        headerText: "#000000",
+        sidebarText: "#000000",
+      }
+    : {
+        header: SHELL_HEADER,
+        sidebar: SHELL_SIDEBAR,
+        headerText: SHELL_HEADER_TEXT,
+        sidebarText: SHELL_SIDEBAR_TEXT,
+      };
+}
+
+/**
+ * Auth-card surface — the same light primary wash as the shell headers,
+ * reused for the resident/admin sign-in cards so the auth screens read as part
+ * of the civic-blue family rather than plain white.
+ *
+ * Text contrast on `#E8F1FA` is unaffected: body text `#1B2733` and secondary
+ * `#475569` both stay well above the WCAG AA 4.5:1 ratio (see the shell-color
+ * contrast table in the repo notes).
+ */
+const AUTH_CARD_SURFACE = SHELL_HEADER;
+
+/**
+ * Resolves the sign-in card background for the current accessibility mode.
+ * High-contrast mode falls back to plain white so the high-contrast palette
+ * stays the dominant, maximum-legibility treatment.
+ */
+export function getAuthCardSurface(highContrast: boolean): string {
+  return highContrast ? "#FFFFFF" : AUTH_CARD_SURFACE;
+}
+
+/**
+ * Telemetry-card surface — a soft top-down wash that starts at the shell
+ * header tint and fades to white, so the dashboard metric cards read as part
+ * of the same civic-blue family as the app bar and sidebar.
+ *
+ * High-contrast mode resolves to flat white: the header tint is white there
+ * too, so the high-contrast palette stays the dominant, maximum-legibility
+ * treatment (same rule as `getShellColors` / `getAuthCardSurface`).
+ */
+export function getTelemetryCardGradient(highContrast: boolean): string {
+  return `linear-gradient(180deg, ${
+    getShellColors(highContrast).header
+  } 0%, #FFFFFF 100%)`;
 }
 
 /**
@@ -159,7 +201,7 @@ function buildTheme(fontScale: FontScale, highContrast: boolean): Theme {
       },
     },
     typography: {
-      fontFamily: `var(--font-roboto), Roboto, Helvetica, Arial, sans-serif`,
+      fontFamily: `var(--font-inter, "Inter"), Inter, Helvetica, Arial, sans-serif`,
       htmlFontSize: 16 * multiplier,
       h1: {
         fontSize: "2.5rem",

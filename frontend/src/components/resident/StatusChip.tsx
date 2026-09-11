@@ -19,6 +19,7 @@ const STATUS_COLORS: Record<string, "default" | "info" | "success" | "warning" |
   responding: "info",
   resolved: "success",
   closed: "default",
+  duplicate: "secondary",
   // Priority
   high: "error",
   critical: "error",

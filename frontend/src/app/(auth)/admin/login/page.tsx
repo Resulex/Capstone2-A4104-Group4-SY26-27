@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Box from "@mui/material/Box";
@@ -23,9 +23,18 @@ import VisibilityOff from "@mui/icons-material/VisibilityOff";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { QRCodeSVG } from "qrcode.react";
 import { useAuth } from "@/context/AuthContext";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { CodeInput, CodeInputHandle } from "@/components/shared/CodeInput";
 import { ApiError, fetchJson } from "@/lib/api";
+import { getAdminLandingPath } from "@/lib/rbac";
+import { getAuthCardSurface } from "@/theme/theme";
 
-const STEPS = ["Credentials", "Verification", "Authenticator Setup"];
+const STEPS = [
+  "Credentials",
+  "Set Password",
+  "Verification",
+  "Authenticator Setup",
+];
 
 // Backend responses use the `{ success, data, message }` envelope.
 interface LoginData {
@@ -36,12 +45,22 @@ interface LoginData {
   needsTotp?: boolean;
   /** Not enrolled yet → run the QR setup steps. */
   needsTotpSetup?: boolean;
+  /** First sign-in with an emailed temporary password → set a new one. */
+  needsNewPassword?: boolean;
+  session?: string;
+}
+
+/** Response of POST /auth/admin/login/new-password. */
+interface NewPasswordData {
+  needsTotp?: boolean;
+  needsTotpSetup?: boolean;
   session?: string;
 }
 
 interface MfaLoginData {
   token?: string;
-  user?: unknown;
+  /** Public admin record returned with the token (includes `assignedRole`). */
+  user?: { assignedRole?: string };
 }
 
 interface SetupData {
@@ -57,6 +76,7 @@ interface VerifyData {
 export default function AdminLoginPage() {
   const router = useRouter();
   const { setToken } = useAuth();
+  const { highContrast } = useAccessibilityTheme();
   const [step, setStep] = useState(0);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -69,12 +89,74 @@ export default function AdminLoginPage() {
   // data (QR provisioning URI + raw secret shown only once).
   const [session, setSession] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  const [codeError, setCodeError] = useState(false);
   const [otpauthUrl, setOtpauthUrl] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
+  /** Refocuses the first code box after a rejected attempt. */
+  const codeInputRef = useRef<CodeInputHandle>(null);
 
-  const finishLogin = async (tokenValue: string) => {
+  // First-login password change (replaces the emailed temporary password).
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const finishLogin = async (tokenValue: string, assignedRole?: string) => {
     await setToken(tokenValue, "admin");
-    router.push("/admin");
+    // Land on the role's home: a role without a dashboard (INFO_OFFICER) goes
+    // straight to its first section instead of a dashboard it cannot use.
+    router.push(getAdminLandingPath(assignedRole));
+  };
+
+  /**
+   * POST /auth/admin/login and route to the next step. Shared by the initial
+   * credentials submit and the post-password-change re-login so both paths
+   * handle the challenge set identically.
+   */
+  const submitCredentials = async (passwordToUse: string): Promise<void> => {
+    const body = await fetchJson<{ data?: LoginData }>(
+      "/api/auth/admin/login",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          userName: username.trim(),
+          password: passwordToUse,
+        }),
+      },
+    );
+    const data = body.data;
+
+    // Security: step-1 /login must NEVER return a session token. Every admin
+    // is required to complete a TOTP challenge (enrolled → 6-digit code,
+    // not enrolled → QR setup). If a token ever arrives here (e.g. an older
+    // backend), refuse to auto-login without MFA.
+    if (data?.token) {
+      setError(
+        "Two-factor authentication is required for this account. Please try again.",
+      );
+      return;
+    }
+
+    if (data?.needsNewPassword && data.session) {
+      // First sign-in with an emailed temporary password → choose a new one.
+      setSession(data.session);
+      setStep(1);
+      return;
+    }
+
+    if (data?.needsTotp && data.session) {
+      // Enrolled → prompt for the 6-digit authenticator code.
+      setSession(data.session);
+      setStep(2);
+      return;
+    }
+
+    if (data?.needsTotpSetup && data.session) {
+      // Not enrolled → show the QR setup step.
+      setSession(data.session);
+      setStep(3);
+      return;
+    }
+
+    setError("Unexpected login response. Please try again.");
   };
 
   const handleCredentialsSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -88,44 +170,7 @@ export default function AdminLoginPage() {
 
     setSubmitting(true);
     try {
-      const body = await fetchJson<{ data?: LoginData }>(
-        "/api/auth/admin/login",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            userName: username.trim(),
-            password,
-          }),
-        },
-      );
-      const data = body.data;
-
-      // Security: step-1 /login must NEVER return a session token. Every admin
-      // is required to complete a TOTP challenge (enrolled → 6-digit code,
-      // not enrolled → QR setup). If a token ever arrives here (e.g. an older
-      // backend), refuse to auto-login without MFA.
-      if (data?.token) {
-        setError(
-          "Two-factor authentication is required for this account. Please try again.",
-        );
-        return;
-      }
-
-      if (data?.needsTotp && data.session) {
-        // Enrolled → prompt for the 6-digit authenticator code.
-        setSession(data.session);
-        setStep(1);
-        return;
-      }
-
-      if (data?.needsTotpSetup && data.session) {
-        // Not enrolled → show the QR setup step.
-        setSession(data.session);
-        setStep(2);
-        return;
-      }
-
-      setError("Unexpected login response. Please try again.");
+      await submitCredentials(password);
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -137,10 +182,93 @@ export default function AdminLoginPage() {
     }
   };
 
-  /** Step 1 — already enrolled: verify the 6-digit authenticator code. */
+  /**
+   * Step 2 — replace the temporary password, then continue with the MFA
+   * challenge the backend hands back (MFA_SETUP for a brand-new admin).
+   */
+  const handleNewPasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+
+    if (!session) {
+      setError("Your session has expired. Please sign in again.");
+      return;
+    }
+    if (
+      newPassword.length < 8 ||
+      !/[A-Z]/.test(newPassword) ||
+      !/[a-z]/.test(newPassword) ||
+      !/\d/.test(newPassword)
+    ) {
+      setError(
+        "Use at least 8 characters with upper-case, lower-case, and numeric characters.",
+      );
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("The passwords do not match.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const body = await fetchJson<{ data?: NewPasswordData }>(
+        "/api/auth/admin/login/new-password",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            userName: username.trim(),
+            session,
+            newPassword,
+          }),
+        },
+      );
+      const data = body.data;
+
+      // The temporary password is single-use, so every later step of this
+      // first-time setup must use the new one.
+      setPassword(newPassword);
+      setNewPassword("");
+      setConfirmPassword("");
+
+      if (data?.needsTotp && data.session) {
+        setSession(data.session);
+        setStep(2);
+        return;
+      }
+      if (data?.needsTotpSetup && data.session) {
+        setSession(data.session);
+        setStep(3);
+        return;
+      }
+
+      // Fallback: re-run the sign-in so the normal challenge routing applies.
+      await submitCredentials(newPassword);
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Failed to set the new password. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /**
+   * Code edits clear the rejected-code styling immediately, so the red boxes
+   * only ever describe the attempt the user has not yet changed.
+   */
+  const handleCodeChange = (value: string) => {
+    setCode(value);
+    setCodeError(false);
+  };
+
+  /** Step 3 — already enrolled: verify the 6-digit authenticator code. */
   const handleCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setCodeError(false);
 
     if (!session || code.trim().length !== 6) {
       setError("Please enter the 6-digit verification code.");
@@ -164,21 +292,25 @@ export default function AdminLoginPage() {
       if (!data?.token) {
         throw new ApiError(0, "No authentication token was returned.");
       }
-      await finishLogin(data.token);
+      await finishLogin(data.token, data.user?.assignedRole);
     } catch (err) {
       setError(
         err instanceof ApiError
           ? err.message
           : "Verification failed. Please check your code and try again.",
       );
+      // Keep the digits so a single mistyped box can be corrected, and put
+      // the caret back on the first box.
+      setCodeError(true);
+      codeInputRef.current?.focus();
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Step 2a — load the QR provisioning data as soon as the setup step opens.
+  // Step 4a — load the QR provisioning data as soon as the setup step opens.
   useEffect(() => {
-    if (step !== 2 || !session || otpauthUrl) return;
+    if (step !== 3 || !session || otpauthUrl) return;
 
     let cancelled = false;
     (async () => {
@@ -210,11 +342,12 @@ export default function AdminLoginPage() {
     };
   }, [step, session, otpauthUrl, username]);
 
-  // Step 2b — verify the new authenticator, then re-submit credentials so the
-  // now-enabled MFA returns a real code challenge (step 1) to finish login.
+  // Step 4b — verify the new authenticator, then re-submit credentials so the
+  // now-enabled MFA returns a real code challenge (step 3) to finish login.
   const handleSetupCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setCodeError(false);
 
     if (!session || code.trim().length !== 6) {
       setError("Please enter the 6-digit verification code.");
@@ -247,7 +380,7 @@ export default function AdminLoginPage() {
       if (data?.needsTotp && data.session) {
         setSession(data.session);
         setCode("");
-        setStep(1);
+        setStep(2);
         return;
       }
       if (data?.token) {
@@ -265,6 +398,10 @@ export default function AdminLoginPage() {
           ? err.message
           : "Verification failed. Please try again.",
       );
+      // Keep the digits so a single mistyped box can be corrected, and put
+      // the caret back on the first box.
+      setCodeError(true);
+      codeInputRef.current?.focus();
     } finally {
       setSubmitting(false);
     }
@@ -275,8 +412,11 @@ export default function AdminLoginPage() {
     setError(null);
     setSession(null);
     setCode("");
+    setCodeError(false);;
     setOtpauthUrl(null);
     setSecret(null);
+    setNewPassword("");
+    setConfirmPassword("");
   };
 
   return (
@@ -285,6 +425,7 @@ export default function AdminLoginPage() {
       sx={{
         p: { xs: 3, sm: 5 },
         borderRadius: 3,
+        bgcolor: getAuthCardSurface(highContrast),
       }}
     >
       <Stack spacing={3}>
@@ -319,13 +460,13 @@ export default function AdminLoginPage() {
 
         {/* Stepper */}
         {/* Temporarily disabled to isolate SSR error */}
-        <Stepper activeStep={step} alternativeLabel>
+        {/* <Stepper activeStep={step} alternativeLabel>
           {STEPS.map((label) => (
             <Step key={label}>
               <StepLabel>{label}</StepLabel>
             </Step>
           ))}
-        </Stepper>
+        </Stepper> */}
 
         {error && (
           <Alert severity="error" role="alert">
@@ -394,29 +535,77 @@ export default function AdminLoginPage() {
             </Stack>
           </Box>
         ) : step === 1 ? (
-          /* Step 2 — Authenticator code (already enrolled) */
+          /* Step 2 — Set a new password (first sign-in with a temporary one) */
+          <Box component="form" onSubmit={handleNewPasswordSubmit} noValidate>
+            <Stack spacing={2}>
+              <Typography variant="body2" color="text.secondary">
+                Your temporary password was accepted. Choose a new password,
+                then continue to two-factor setup.
+              </Typography>
+              <TextField
+                label="New Password"
+                type="password"
+                autoComplete="new-password"
+                fullWidth
+                required
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                inputProps={{ "aria-label": "New password" }}
+                helperText="At least 8 characters with upper-case, lower-case, and numeric characters."
+              />
+              <TextField
+                label="Confirm New Password"
+                type="password"
+                autoComplete="new-password"
+                fullWidth
+                required
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                inputProps={{ "aria-label": "Confirm new password" }}
+              />
+
+              <Button
+                type="submit"
+                variant="contained"
+                color="primary"
+                size="large"
+                fullWidth
+                disabled={submitting || !newPassword || !confirmPassword}
+              >
+                SET PASSWORD &amp; CONTINUE
+              </Button>
+
+              <Button
+                variant="text"
+                color="inherit"
+                startIcon={<ArrowBackIcon />}
+                onClick={handleBack}
+                fullWidth
+              >
+                Back to credentials
+              </Button>
+            </Stack>
+          </Box>
+        ) : step === 2 ? (
+          /* Step 3 — Authenticator code (already enrolled) */
           <Box component="form" onSubmit={handleCodeSubmit} noValidate>
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
                 Enter the 6-digit code from your authenticator app (e.g. Google
                 Authenticator) to finish signing in.
               </Typography>
-              <TextField
+              <CodeInput
+                key="mfa-code"
+                ref={codeInputRef}
                 label="Verification Code"
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                fullWidth
-                required
                 value={code}
-                onChange={(e) =>
-                  setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
-                }
-                inputProps={{
-                  "aria-label": "6-digit authenticator code",
-                  maxLength: 6,
-                }}
+                onChange={handleCodeChange}
+                ariaLabel="6-digit authenticator code"
                 helperText={`${code.length}/6 digits entered`}
+                error={codeError}
+                disabled={submitting}
+                required
+                autoFocus
               />
 
               <Button
@@ -441,8 +630,8 @@ export default function AdminLoginPage() {
               </Button>
             </Stack>
           </Box>
-        ) : step === 2 ? (
-          /* Step 3 — Authenticator Setup (first login / QR enrollment) */
+        ) : step === 3 ? (
+          /* Step 4 — Authenticator Setup (first login / QR enrollment) */
           <Box component="form" onSubmit={handleSetupCodeSubmit} noValidate>
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
@@ -473,22 +662,18 @@ export default function AdminLoginPage() {
                 </Stack>
               )}
 
-              <TextField
+              <CodeInput
+                key="enroll-code"
+                ref={codeInputRef}
                 label="Verification Code"
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                fullWidth
-                required
                 value={code}
-                onChange={(e) =>
-                  setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
-                }
-                inputProps={{
-                  "aria-label": "6-digit verification code",
-                  maxLength: 6,
-                }}
+                onChange={handleCodeChange}
+                ariaLabel="6-digit verification code"
                 helperText={`${code.length}/6 digits entered`}
+                error={codeError}
+                disabled={submitting}
+                required
+                autoFocus
               />
 
               <Button

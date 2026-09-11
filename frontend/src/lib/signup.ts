@@ -28,6 +28,10 @@ export interface SignupPayload {
   barangayId: string;
   houseUnitNumber: string;
   streetPurokName: string;
+  /** Consent captured on the signup legal screen; the backend requires `true`. */
+  acceptTerms: boolean;
+  /** Version of the Terms + Data Privacy Policy the resident accepted. */
+  termsVersion: string;
 }
 
 /** The created account's public shape (from `User.toPublicJSON()`). */

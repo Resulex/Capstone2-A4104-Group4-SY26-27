@@ -108,6 +108,50 @@ export async function resolveAuthContext(
   return withAdminContext(auth);
 }
 
+/** Identifies the human behind a status change, for the history/audit trail. */
+export interface ChangeActor {
+  userId: string;
+  fullName: string;
+}
+
+/**
+ * Resolves the display identity of the caller making a status change. Admins
+ * resolve against the Admin collection, officials are Resident-backed, and
+ * residents (who may not change statuses) resolve to null. The returned name is
+ * denormalized onto the history entry so it survives later profile renames.
+ */
+export async function actorIdentity(
+  auth: AuthContext
+): Promise<ChangeActor | null> {
+  if (auth.role === 'admin') {
+    await connectToDatabase();
+    const admin = await Admin.findOne({ adminId: auth.userId })
+      .orFail()
+      .catch(() => null);
+    const resolved =
+      admin ??
+      (mongoose.isValidObjectId(auth.userId)
+        ? await Admin.findById(auth.userId)
+        : null);
+    if (!resolved) return null;
+    return {
+      userId: String(resolved._id),
+      fullName:
+        [resolved.firstName, resolved.middleName, resolved.lastName]
+          .filter(Boolean)
+          .join(' ') || resolved.userName,
+    };
+  }
+
+  if (auth.role === 'official') {
+    // Officials operate through the resident portal, so their token `sub` is a
+    // Resident `_id` and their display name comes from the same lookup.
+    return { userId: auth.userId, fullName: await residentFullName(auth.userId) };
+  }
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Role guards
 // ---------------------------------------------------------------------------

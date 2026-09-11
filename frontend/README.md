@@ -41,7 +41,20 @@ Copy `.env.example` to `.env` and adjust as needed:
 | --- | --- | --- |
 | `API_BACKEND_URL` | `http://localhost:3000` | Base URL of the REST backend |
 | `API_BACKEND_STAGE` | `dev` | Stage prefix used by `serverless offline` |
-| `API_WEBSOCKET_URL` | `ws://localhost:3002` | Base URL of the WebSocket server |
+| `API_WEBSOCKET_URL` | `ws://localhost:3001` | Base URL of the WebSocket server (read by `next.config.ts`) |
+| `NEXT_PUBLIC_WEBSOCKET_URL` | `ws://localhost:3001` | WebSocket URL used by the client hook; must match `custom.serverless-offline.websocketPort` (port 3002 is offline's HTTP `lambdaPort`, not the WS port) |
+| `SESSION_COOKIE_MAX_AGE_SECONDS` | `604800` | `kbc_token` Max-Age; keep in step with the backend `JWT_EXPIRES_IN` |
+| `COOKIE_SECURE` | unset | Force the cookie's `Secure` attribute. Unset ⇒ Secure when `NODE_ENV=production`. Set `false` to test over plain HTTP |
+
+#### Session cookie
+
+The session JWT lives in the httpOnly `kbc_token` cookie. Its attributes are
+defined once in `src/lib/session-cookie.ts` so the set and clear paths cannot
+drift apart. `GET /api/auth/me` validates the cookie by calling the backend
+`GET /auth/session` endpoint (which runs the `auth-jwt` authorizer), so an
+expired or tampered cookie is detected and cleared instead of leaving the UI in
+a half-logged-in state. A backend outage returns `502` with
+`{ unavailable: true }` — that is *not* a logout, and clients keep their state.
 
 ### Admin login (`/admin/login`)
 
@@ -62,7 +75,7 @@ Copy `.env.example` to `.env` and adjust as needed:
 4. The frontend stores the JWT in an httpOnly cookie and redirects to `/`.
    First-time resident registration is handled server-side by the backend.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Inter](https://fonts.google.com/specimen/Inter), loaded as a variable font for the entire app (admin, resident, and auth routes).
 
 ## Learn More
 

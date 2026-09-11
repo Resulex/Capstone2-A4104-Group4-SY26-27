@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
-import Snackbar from "@mui/material/Snackbar";
 import Toolbar from "@mui/material/Toolbar";
+import { NotificationToast } from "@/components/shared/NotificationToast";
 import { SessionTimeoutDialog } from "@/components/shared/SessionTimeoutDialog";
 import { ResidentSidebar } from "@/components/resident/ResidentSidebar";
 import { ResidentHeader } from "@/components/resident/ResidentHeader";
@@ -44,9 +43,11 @@ export default function ResidentLayout({
   const { isAuthenticated, isLoading, user } = useAuth();
 
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || user?.role !== "resident")) {
-      router.replace("/login");
-    }
+    if (isLoading || (isAuthenticated && user?.role === "resident")) return;
+    // Distinguish "no session" from "session with a role that has no portal"
+    // (e.g. `official`, or an admin session left in the shared cookie) so the
+    // login page can explain itself instead of silently re-rendering the form.
+    router.replace(isAuthenticated ? "/login?role=unsupported" : "/login");
   }, [isLoading, isAuthenticated, user, router]);
 
   if (isLoading || !isAuthenticated || user?.role !== "resident") {
@@ -70,7 +71,7 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
   const { profile, clearProfile } = useResident();
   const { data, addNotificationLocal } = useResidentDashboard();
 
-  const hasConsented = Boolean(profile?.termsAcceptedAt);
+  const hasConsented = Boolean(user?.termsAcceptedAt);
   const isLegalPage = pathname === "/legal";
 
   const [expanded, setExpanded] = useState(true);
@@ -81,7 +82,9 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
   const handleMobileOpen = () => setMobileOpen(true);
 
   // A resident must accept the Terms + Data Privacy Policy before using the
-  // portal; only `/legal` is reachable until they do.
+  // portal; only `/legal` is reachable until they do. Consent comes from the
+  // server-verified session (`/api/auth/me` → backend), not from the cached
+  // resident profile, which can be stale or tampered with.
   useEffect(() => {
     if (!hasConsented && !isLegalPage) router.replace("/legal");
   }, [hasConsented, isLegalPage, router]);
@@ -173,6 +176,10 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
     (n) => n.notificationCategory === "chatMessage" && !n.isRead,
   ).length;
 
+  // Count badge on the sidebar's Notifications entry (every unread category,
+  // so incident/document status updates are not missed).
+  const unreadNotifications = data.notifications.filter((n) => !n.isRead).length;
+
   // Block navigation into the portal until consent is recorded (the `/legal`
   // page remains reachable). Render nothing while the redirect is in flight.
   if (!hasConsented && !isLegalPage) return null;
@@ -187,6 +194,7 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
         onLogout={handleLogout}
         legalOnly={!hasConsented}
         chatUnread={unreadChatCount}
+        notificationsUnread={unreadNotifications}
       />
 
       <Box
@@ -240,21 +248,15 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
         onSignOut={handleLogout}
       />
 
-      <Snackbar
-        open={toast !== null}
-        anchorOrigin={{ vertical: "top", horizontal: "right" }}
-        autoHideDuration={8000}
+      {/* Real-time notification toast (top-right): auto-closes after 10s, and
+          holds while the pointer or keyboard focus is on it. */}
+      <NotificationToast
+        notificationKey={toast?.notificationId ?? toast?._id ?? null}
+        title={toast?.titleText}
+        body={toast?.messageBody ?? ""}
         onClose={() => setToast(null)}
-      >
-        <Alert
-          severity="info"
-          variant="filled"
-          onClose={() => setToast(null)}
-          sx={{ width: "100%", maxWidth: 420 }}
-        >
-          <strong>{toast?.titleText}</strong> — {toast?.messageBody}
-        </Alert>
-      </Snackbar>
+        maxWidth={420}
+      />
     </Box>
   );
 }
