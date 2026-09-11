@@ -20,6 +20,8 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import { AccessibilityControls } from "@/components/AccessibilityControls";
 import { WebSocketStatus } from "@/components/admin/WebSocketStatus";
 import { SIDEBAR_WIDTH } from "@/components/admin/AdminSidebar";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getShellColors } from "@/theme/theme";
 import { NotificationRecord } from "@/lib/admin";
 import { useAccessibilityTheme } from "@/context/ThemeContext";
 import { getShellColors } from "@/theme/theme";

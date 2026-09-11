@@ -1,0 +1,98 @@
+name: CI
+
+# Pull requests only.
+#
+# Pushes to `main` are covered by deploy.yml, which runs these same gates before
+# it deploys — so `main` never gets a duplicate set of checks and the gates that
+# matter are the ones immediately in front of the deploy.
+#
+# Docs: docs/CICD.md
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-ci:
+    name: backend-ci
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # `serverless.yml` is the only route registry, and a handler with no route
+      # block is a silent runtime 404 rather than a compile error. This is the
+      # guard that has caught that regression twice.
+      - name: Route parity guard
+        run: npm run verify:routes
+
+      # `serverless package` bundles every handler and validates serverless.yml.
+      # It needs no AWS credentials: the config contains no ${ssm:}/${cf:}
+      # lookups, so nothing is resolved against the account.
+      - name: Package (serverless package)
+        run: npm run build
+
+  frontend-ci:
+    name: frontend-ci
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      # Read at build time by next.config.ts (rewrites). The authoritative
+      # values live in Amplify; supplying them here keeps this an accurate
+      # rehearsal of the Amplify build instead of silently falling back to
+      # localhost.
+      API_BACKEND_URL: ${{ vars.API_BACKEND_URL || 'http://localhost:3000' }}
+      API_BACKEND_STAGE: ${{ vars.STAGE || 'dev' }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Lint (zero warnings)
+        run: npm run lint -- --max-warnings=0
+
+      # The exact command Amplify runs. `npm run build` would force turbopack,
+      # which Amplify does not use, so a turbopack-only failure could pass here
+      # and then break the deploy.
+      - name: Production build (as Amplify builds it)
+        run: npm run build:amplify

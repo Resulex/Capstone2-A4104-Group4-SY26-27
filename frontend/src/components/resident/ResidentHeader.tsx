@@ -21,6 +21,8 @@ import {
   RESIDENT_SIDEBAR_WIDTH,
   RESIDENT_SIDEBAR_WIDTH_COLLAPSED,
 } from "@/components/resident/ResidentSidebar";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getShellColors } from "@/theme/theme";
 
 interface ResidentHeaderProps {
   /** Whether the desktop drawer is expanded. */

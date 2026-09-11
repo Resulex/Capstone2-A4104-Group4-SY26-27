@@ -81,8 +81,8 @@ export function isAllowedFolder(folder: string): folder is UploadFolder {
  */
 function sanitizeBaseName(fileName: string): string {
   const base = fileName
-    .replace(/[^\w.\-]+/g, '-')
-    .replace(/^[\-.]+|[\-.]+$/g, '')
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/^[.-]+|[.-]+$/, '')
     .slice(0, 40);
   return base || 'file';
 }

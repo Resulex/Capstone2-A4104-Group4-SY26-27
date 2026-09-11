@@ -25,8 +25,12 @@ This repository is a monorepo containing two independent applications:
 
 ```
 .
+├── .github/      # CI/CD workflows
 ├── backend/      # Serverless API — Function-per-Use-Case architecture
+├── docs/         # Architecture and operations docs
 ├── frontend/     # Next.js client
+├── scripts/      # Operational scripts (CI/CD bootstrap)
+├── amplify.yml   # AWS Amplify Hosting build spec (frontend)
 └── README.md     # This file
 ```
 
@@ -91,3 +95,23 @@ Seeded test accounts (see `backend/src/scripts/seed-data.ts`):
 Both applications read configuration from a `.env` file (not committed to
 source control). Copy the provided `.env.example` in each folder and adjust
 as needed. See the individual READMEs for the full variable reference.
+
+## CI/CD
+
+**Merging to `main` deploys everything.** Two GitHub Actions workflows own the
+pipeline:
+
+- `ci.yml` runs on pull requests — typecheck, lint, route parity, and the exact
+  production build Amplify uses.
+- `deploy.yml` runs on push to `main` — deploys the backend, applies and verifies
+  database migrations, then triggers and waits for the Amplify build.
+
+One-time setup (creates the OIDC deploy role, the Amplify app + branch, and every
+GitHub secret and variable):
+
+```bash
+./scripts/bootstrap-cicd.sh
+```
+
+See [`docs/CICD.md`](./docs/CICD.md) for the pipeline diagram, the full secret
+inventory, and the rollback runbook.
