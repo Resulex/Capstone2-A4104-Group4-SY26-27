@@ -23,8 +23,6 @@ import { SIDEBAR_WIDTH } from "@/components/admin/AdminSidebar";
 import { useAccessibilityTheme } from "@/context/ThemeContext";
 import { getShellColors } from "@/theme/theme";
 import { NotificationRecord } from "@/lib/admin";
-import { useAccessibilityTheme } from "@/context/ThemeContext";
-import { getShellColors } from "@/theme/theme";
 
 interface AdminHeaderProps {
   /** Whether the desktop drawer is expanded. */
@@ -69,6 +67,7 @@ export function AdminHeader({
 }: AdminHeaderProps) {
   const { highContrast } = useAccessibilityTheme();
   const shell = getShellColors(highContrast);
+
   const [bellAnchor, setBellAnchor] = useState<HTMLElement | null>(null);
   const unread = notifications.filter((n) => !n.isRead);
 

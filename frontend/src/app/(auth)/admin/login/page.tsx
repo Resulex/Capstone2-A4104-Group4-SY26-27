@@ -14,9 +14,12 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import Alert from "@mui/material/Alert";
-import Stepper from "@mui/material/Stepper";
-import Step from "@mui/material/Step";
-import StepLabel from "@mui/material/StepLabel";
+// Stepper UI is hidden for now — the markup is commented out further down.
+// These stay commented with it so restoring the four-step header is a matter of
+// uncommenting both blocks.
+// import Stepper from "@mui/material/Stepper";
+// import Step from "@mui/material/Step";
+// import StepLabel from "@mui/material/StepLabel";
 import Image from "next/image";
 import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
@@ -29,12 +32,13 @@ import { ApiError, fetchJson } from "@/lib/api";
 import { getAdminLandingPath } from "@/lib/rbac";
 import { getAuthCardSurface } from "@/theme/theme";
 
-const STEPS = [
-  "Credentials",
-  "Set Password",
-  "Verification",
-  "Authenticator Setup",
-];
+// Labels for the hidden Stepper (see the commented block in the JSX below).
+// const STEPS = [
+//   "Credentials",
+//   "Set Password",
+//   "Verification",
+//   "Authenticator Setup",
+// ];
 
 // Backend responses use the `{ success, data, message }` envelope.
 interface LoginData {
