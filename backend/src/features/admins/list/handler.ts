@@ -21,7 +21,8 @@ export async function listAdmins(
 
   const admins = await Admin.find().lean();
   const publicList = admins.map((a) => {
-    const { passwordHash, ...rest } = a as unknown as Record<string, unknown>;
+    // Destructured purely to omit the hash; the binding is intentionally unused.
+    const { passwordHash: _passwordHash, ...rest } = a as unknown as Record<string, unknown>;
     return rest;
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -48,10 +48,26 @@ function formatTime(iso?: string): string {
 }
 
 /**
+ * Route entry point.
+ *
+ * `useSearchParams()` must be read inside a `<Suspense>` boundary, otherwise
+ * the static prerender of this route fails the production build with
+ * "useSearchParams() should be wrapped in a suspense boundary". The inner
+ * component owns the hook; this wrapper supplies the boundary.
+ */
+export default function ChatSessionsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ChatSessionsPageContent />
+    </Suspense>
+  );
+}
+
+/**
  * Admin Live Chat page — a two-panel chat: sessions on the left, the selected
  * session's message thread (with a reply box) on the right.
  */
-export default function ChatSessionsPage() {
+function ChatSessionsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const incidentParam = searchParams.get("incident");

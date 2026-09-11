@@ -3,7 +3,7 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { created, badRequest } from '../../../shared/responses';
 import { conflictError, badRequestError } from '../../../shared/errors';
-import { Message, ChatSession, Resident, Admin } from '../../../models';
+import { Message, ChatSession, Admin } from '../../../models';
 import { getAuthContext } from '../../../shared/authorization';
 import { sendAdminNotification, sendResidentNotification, residentFullName } from '../../../shared/notifications';
 

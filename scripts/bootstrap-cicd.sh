@@ -220,7 +220,6 @@ cat > "${WORK_DIR}/policy.json" <<JSON
       "Resource": "*"
     },
     {
-      "Comment": "Only needed if provision:cognito / reset:mfa ever run from CI.",
       "Sid": "CognitoMaintenanceScripts",
       "Effect": "Allow",
       "Action": [

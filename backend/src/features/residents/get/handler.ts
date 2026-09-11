@@ -29,9 +29,11 @@ export async function getResident(
     throw notFoundError('Resident not found.');
   }
 
-  // Residents may only view their own record.
+  // Residents may only view their own record. Pass the whole document: the
+  // guard matches on `_id` first (the JWT `sub`), falling back to the custom
+  // `residentId` for records that predate the Google-SSO id change.
   if (auth.role === 'resident') {
-    assertResidentOwnership(auth, resident.residentId);
+    assertResidentOwnership(auth, resident);
   }
 
   return ok(resident.toPublicJSON(), 'Resident fetched.');

@@ -4,12 +4,16 @@ import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } 
 import { ok } from '../../../shared/responses';
 import { badRequestError, notFoundError } from '../../../shared/errors';
 import { DocumentRequest } from '../../../models';
-import { residentFullName, notifyAllActiveAdmins } from '../../../shared/notifications';
 import {
-  getAuthContext,
+  residentFullName,
+  notifyAllActiveAdmins,
+  sendResidentNotification,
+} from '../../../shared/notifications';
+import {
   assertOwnResidentRecord,
   resolveAuthContext,
   requireStaffOrAdmin,
+  actorIdentity,
 } from '../../../shared/authorization';
 
 interface UpdateDocumentRequestBody {
@@ -66,37 +70,57 @@ export async function updateDocumentRequest(
       status: t.status,
     }));
   }
+  const remark = body.remarks?.trim();
+
   if (body.currentStatus !== undefined) {
     // Rejecting a request requires a remark explaining the decision.
-    if (body.currentStatus === 'Rejected' && !body.remarks?.trim()) {
+    if (body.currentStatus === 'Rejected' && !remark) {
       throw badRequestError('Remarks are required when rejecting a document request.');
     }
     const changed = request.currentStatus !== body.currentStatus;
     request.currentStatus = body.currentStatus;
     statusChanged = changed;
+    if (!Array.isArray(request.timeline)) request.timeline = [];
     if (changed) {
-      // Record the reached status in the resident-visible progress timeline.
-      if (!Array.isArray(request.timeline)) request.timeline = [];
+      // Record the reached status in the resident-visible progress timeline,
+      // together with the note and the officer who made the decision.
       request.timeline.push({
         step: body.currentStatus,
         date: new Date(),
         status: 'completed',
+        remarks: remark || undefined,
+        changedBy: (await actorIdentity(auth)) ?? undefined,
       });
+      request.remarks = remark || undefined;
+    } else if (remark !== undefined) {
+      // Same status resubmitted with a note: only the latest-remark field
+      // moves — history is append-only and never rewritten.
+      request.remarks = remark || undefined;
     }
-  }
-  if (body.remarks !== undefined) {
-    request.remarks = body.remarks.trim() || undefined;
+  } else if (body.remarks !== undefined) {
+    // Note-only edit (no status transition) — update the latest remark only.
+    request.remarks = remark || undefined;
   }
 
   await request.save();
 
-  // Notify admins when the request's processing status actually changed.
+  // Notify admins (and the requesting resident) when the status actually changed.
   if (statusChanged) {
     const name = await residentFullName(String(request.residentId));
+    const remarkNote = request.remarks ? ` — "${request.remarks}"` : '';
+
     await notifyAllActiveAdmins({
       category: 'documentUpdate',
       titleText: 'Document Request Updated',
-      messageBody: `${name}'s document request ${request.requestId} is now ${request.currentStatus}`,
+      messageBody: `${name}'s document request ${request.requestId} is now ${request.currentStatus}${remarkNote}`,
+      referenceUrlId: request.requestId,
+    });
+
+    await sendResidentNotification({
+      recipientId: String(request.residentId),
+      category: 'documentUpdate',
+      titleText: 'Document Request Updated',
+      messageBody: `Your document request ${request.requestId} is now ${request.currentStatus}${remarkNote}`,
       referenceUrlId: request.requestId,
     });
   }

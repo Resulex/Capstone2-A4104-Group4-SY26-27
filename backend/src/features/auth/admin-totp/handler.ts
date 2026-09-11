@@ -5,7 +5,7 @@ import { ok } from '../../../shared/responses';
 import { badRequestError, conflictError, unauthorizedError } from '../../../shared/errors';
 import { Admin } from '../../../models';
 import { resolveAuthContext, requireAdmin } from '../../../shared/authorization';
-import { comparePassword, hashPassword } from '../../../shared/password';
+import { hashPassword } from '../../../shared/password';
 import {
   generateTotpSecret,
   encryptTotpSecret,

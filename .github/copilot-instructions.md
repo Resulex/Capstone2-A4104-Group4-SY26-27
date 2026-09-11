@@ -6,8 +6,9 @@ Monorepo: `backend/` (serverless API — Node/TypeScript, Lambda + API Gateway, 
 
 ## Verify before reporting done
 
-- Backend: `npm --prefix backend run typecheck` — there is exactly ONE known pre-existing error,
-  `src/features/residents/get/handler.ts:34`; treat any other error as new. Run
+- Backend: `npm --prefix backend run typecheck` — must be clean (0 errors); every reported error is
+  new and must be fixed before reporting done. (The old baseline error,
+  `src/features/residents/get/handler.ts:34`, was fixed on 2026-09-12.) Run
   `npm --prefix backend run verify:routes` whenever `serverless.yml` changes.
 - Frontend: `npx tsc --noEmit` (there is no `typecheck` script) and `npm run lint` in `frontend/`.
   Five pre-existing unused-import warnings are expected; don't "fix" them unless asked.
@@ -30,8 +31,11 @@ backend calls as helpers here, not as raw `fetch`.
   error — it is a silent runtime 404. This has happened repeatedly (auth MFA routes, then
   `notifications/mine` + `notifications/read-all`), which is why `verify:routes` runs on
   `prebuild`/`predeploy`. When adding a frontend call, confirm its route is declared.
-- Route-table changes need a FULL `npm run offline` restart; `reloadHandler` reloads handler code
-  only, not routes.
+- Route-table changes need a FULL `npm run offline` restart. `reloadHandler` is deliberately OFF in
+  `serverless.yml` — it made serverless-offline spawn a fresh worker (and a fresh Atlas connection)
+  per request — so handler-code edits also need a restart unless you use `npm run offline:reload`.
+- The offline server connects to Atlas on the first request of each worker; a route that has been
+  idle past `terminateIdleLambdaTime` (60s) pays one reconnect, so measure latency with two calls.
 - Reuse the shared layer rather than re-implementing: `shared/handler.ts` (`parseBody`,
   `parsePathParam`, `buildIdOrCustomIdQuery`), `shared/authorization.ts` (`resolveAuthContext`,
   `requireStaffOrAdmin`, `requireAdmin`, `requireAssignedRole`, `actorIdentity`),
@@ -63,8 +67,14 @@ cookie. The JWT `sub` is the Mongo `_id` for both admins and residents. Admin `a
 
 ## Local-stack gotchas
 
-- No WebSocket endpoint is deployed (no `websocket` events in `serverless.yml`), so real-time
-  delivery falls back to polling. `useOnlineStatus()` tracks browser connectivity only, so submit
-  buttons stay enabled under `serverless-offline` even while the header chip reads "Offline".
+- `serverless.yml` registers a WebSocket API (`ws-connect`/`$connect`, `ws-disconnect`,
+  `ws-default`) and `custom.serverless-offline.websocketPort: 3001`; the frontend's
+  `NEXT_PUBLIC_WEBSOCKET_URL` must match that port (`verify:routes` fails otherwise). Port **3002**
+  is serverless-offline's HTTP `lambdaPort`, so pointing the socket there yields a handshake 404.
+  Real-time push still needs `WEBSOCKET_ENDPOINT` (local `http://localhost:3001`, deployed the
+  `wss://…execute-api…` URL); when it is unset `broadcastToAdmin` no-ops and both shells fall back
+  to polling (admin bell 8s in `app/admin/layout.tsx`, residents 8s).
+- `useOnlineStatus()` tracks browser connectivity only, so submit buttons stay enabled under
+  `serverless-offline` even while the header chip (browser-online && WS-connected) reads "Offline".
 - Dev data predates newer fields (e.g. incident/document `timeline`). UI must degrade gracefully for
   records without history rather than requiring a migration.
