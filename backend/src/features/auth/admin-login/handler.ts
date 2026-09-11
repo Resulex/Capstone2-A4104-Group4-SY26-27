@@ -35,6 +35,9 @@ interface AdminLoginBody {
  * - 200 { data:{ authenticated:false, needsTotpSetup:true, session } } —
  *   password verified but no TOTP authenticator yet; run the QR setup
  *   (POST /auth/admin/login/totp/setup then /totp/verify), then re-login.
+ * - 200 { data:{ authenticated:false, needsNewPassword:true, session } } —
+ *   first sign-in with the emailed temporary password; set a new one via
+ *   POST /auth/admin/login/new-password, then continue to TOTP enrollment.
  * - 401 — invalid credentials.
  * - 403 — the admin account is not active.
  *
@@ -100,6 +103,19 @@ export async function adminLogin(
         session: result.session,
       },
       'Two-factor authentication is not set up. Scan the QR code to enroll.'
+    );
+  }
+
+  // First sign-in with the emailed temporary password → the admin must choose
+  // their own password before MFA enrollment continues.
+  if (result.challenge === 'NEW_PASSWORD_REQUIRED') {
+    return ok(
+      {
+        authenticated: false,
+        needsNewPassword: true,
+        session: result.session,
+      },
+      'Set a new password to continue with first-time setup.'
     );
   }
 

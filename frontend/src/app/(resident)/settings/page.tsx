@@ -19,6 +19,7 @@ import { FontScale } from "@/theme/theme";
 import { PageHeader } from "@/components/resident/PageHeader";
 
 const FONT_SCALE_OPTIONS: { value: FontScale; label: string }[] = [
+  { value: "xs", label: "Aa (Extra Small)" },
   { value: "small", label: "Aa (Small)" },
   { value: "default", label: "Aa (Default)" },
   { value: "large", label: "Aa (Large)" },

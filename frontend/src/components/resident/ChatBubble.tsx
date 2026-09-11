@@ -14,6 +14,12 @@ interface ChatBubbleProps {
   isUser: boolean;
   /** Whether to render the "Urgent" marker (mirrors the admin thread). */
   urgency?: boolean;
+  /** Optimistic echo still awaiting the server's confirmation. */
+  pending?: boolean;
+  /** Optimistic echo whose send failed. */
+  failed?: boolean;
+  /** Retry a failed echo (only used when `failed` is true). */
+  onRetry?: () => void;
 }
 
 /**
@@ -21,12 +27,18 @@ interface ChatBubbleProps {
  * conversation looks the same from both sides. The viewer's own messages sit
  * on the right (primary tone) and the other party's on the left (light tone),
  * with only the timestamp underneath (no sender label).
+ *
+ * While the send is in flight the bubble renders dimmed with a "Sending…"
+ * caption; a failed send is outlined and offers a tap-to-retry caption.
  */
 export function ChatBubble({
   message,
   timestamp,
   isUser,
   urgency = false,
+  pending = false,
+  failed = false,
+  onRetry,
 }: ChatBubbleProps) {
   return (
     <Box
@@ -48,6 +60,8 @@ export function ChatBubble({
           color: isUser ? "primary.contrastText" : "text.primary",
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
+          opacity: pending ? 0.6 : 1,
+          ...(failed && { border: 1, borderColor: "error.main" }),
         }}
       >
         <Typography variant="body2" sx={{ lineHeight: 1.5 }}>
@@ -57,10 +71,29 @@ export function ChatBubble({
           <Chip label="Urgent" size="small" color="error" sx={{ mt: 0.5 }} />
         )}
       </Box>
-      {timestamp && (
-        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25 }}>
-          {formatDateTime(timestamp)}
+      {failed ? (
+        <Typography
+          variant="caption"
+          color="error"
+          onClick={onRetry}
+          sx={{ mt: 0.25, cursor: onRetry ? "pointer" : "default" }}
+        >
+          Not sent — tap to retry
         </Typography>
+      ) : pending ? (
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25 }}>
+          Sending…
+        </Typography>
+      ) : (
+        timestamp && (
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ mt: 0.25 }}
+          >
+            {formatDateTime(timestamp)}
+          </Typography>
+        )
       )}
     </Box>
   );

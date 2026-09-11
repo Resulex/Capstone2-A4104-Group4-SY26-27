@@ -1,130 +1,240 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import Toolbar from "@mui/material/Toolbar";
-import Snackbar from "@mui/material/Snackbar";
 import Alert from "@mui/material/Alert";
+import Button from "@mui/material/Button";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import { NotificationToast } from "@/components/shared/NotificationToast";
 import { SessionTimeoutDialog } from "@/components/shared/SessionTimeoutDialog";
+import { PageLoader } from "@/components/shared/PageLoader";
 import { AdminSidebar, SIDEBAR_WIDTH } from "@/components/admin/AdminSidebar";
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { useAuth } from "@/context/AuthContext";
-import { DashboardDataProvider, useDashboardData } from "@/context/DashboardDataContext";
+import { AdminProfileProvider } from "@/context/AdminProfileContext";
+import {
+  AdminNotificationsProvider,
+  useAdminNotifications,
+} from "@/context/AdminNotificationsContext";
+import {
+  DashboardDataProvider,
+  useDashboardData,
+} from "@/context/DashboardDataContext";
 import { OnlineStatusProvider } from "@/context/OnlineStatusContext";
 import { useIdleSession } from "@/hooks/useIdleSession";
 import { useAdminProfile } from "@/hooks/useAdminProfile";
-import { useWebSocket } from "@/hooks/useWebSocket";
 import { clearLastActive } from "@/lib/session";
-import { canAccessAdminRoute } from "@/lib/rbac";
 import {
-  NotificationRecord,
-  fetchMyNotifications,
-  fetchAdminWsToken,
-  markAllNotificationsRead,
-  updateNotification,
-  playNotificationSound,
-} from "@/lib/admin";
+  ADMIN_DASHBOARD_PATH,
+  canAccessAdminRoute,
+  canViewAdminDashboard,
+  getAdminLandingPath,
+} from "@/lib/rbac";
 
 /**
- * Shared shell for the admin section.
+ * Admin console shell.
  *
- * Owns the collapsible sidebar (persistent mini-variant on desktop, temporary
- * on mobile) and the top app bar, so every `/admin/*` page inherits a
- * consistent layout without repeating the scaffolding. Wraps children in the
- * dashboard-data provider so the header badge and the page share one fetch.
+ * Composes the session gate, the shared profile + dashboard-data providers, the
+ * per-route RBAC gate, and finally the visual shell (collapsible sidebar + top
+ * app bar). Nothing from the console paints until the signed-in admin's
+ * `assignedRole` is known, so the RBAC-filtered navigation never flashes in its
+ * unfiltered state.
  */
 export default function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  return <AdminAuthGate>{children}</AdminAuthGate>;
+}
+
+/**
+ * Session gate for the whole admin section.
+ *
+ * Bounces anyone without an admin session to the login page and, until that
+ * session is verified, renders only the loader — never the console chrome. The
+ * profile and dashboard-data providers live inside this gate so they are not
+ * mounted (and therefore issue no requests) for anonymous visitors.
+ */
+function AdminAuthGate({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const { isAuthenticated, isLoading, user } = useAuth();
+  const isAdmin = isAuthenticated && user?.role === "admin";
+
+  useEffect(() => {
+    if (isLoading || isAdmin) return;
+    router.replace("/admin/login");
+  }, [isLoading, isAdmin, router]);
+
+  if (isLoading || !isAdmin) {
+    return <PageLoader label="Loading admin console" />;
+  }
+
   return (
-    <DashboardDataProvider>
-      <AdminShell>{children}</AdminShell>
-    </DashboardDataProvider>
+    <AdminProfileProvider>
+      <DashboardDataProvider>
+        <AdminProfileGate>{children}</AdminProfileGate>
+      </DashboardDataProvider>
+    </AdminProfileProvider>
   );
 }
 
-function AdminShell({ children }: { children: React.ReactNode }) {
+/**
+ * Profile gate.
+ *
+ * `assignedRole` decides which navigation items and routes are visible, so the
+ * shell must not render without it. A role that cannot open the current route is
+ * sent to its landing path behind the loader, and a profile that cannot be
+ * fetched at all fails closed — an error card with Retry instead of an
+ * over-permissive menu.
+ */
+function AdminProfileGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, user, logout } = useAuth();
-  const { profile } = useAdminProfile();
-  const { dashboardData } = useDashboardData();
+  const { profile, isLoading, error, reload } = useAdminProfile();
+  const handleLogout = useAdminLogout();
   const adminRole = profile?.assignedRole;
 
-  // Role-based route guard: send restricted roles back to the dashboard home.
+  // Roles without a dashboard (INFO_OFFICER) must not sit on the overview, and
+  // a role that cannot open the current route goes to the first section it can.
+  const pathAllowed = adminRole
+    ? canAccessAdminRoute(adminRole, pathname) &&
+      (pathname !== ADMIN_DASHBOARD_PATH || canViewAdminDashboard(adminRole))
+    : false;
+
   useEffect(() => {
-    if (adminRole && !canAccessAdminRoute(adminRole, pathname)) {
-      router.replace("/admin");
-    }
-  }, [adminRole, pathname, router]);
+    if (!adminRole || pathAllowed) return;
+    router.replace(getAdminLandingPath(adminRole));
+  }, [adminRole, pathAllowed, router]);
+
+  if (isLoading) {
+    return <PageLoader label="Loading admin console" />;
+  }
+
+  // No profile means no role, which means no way to decide what is safe to
+  // show — so show nothing from the console and offer Retry/Log out instead.
+  if (!profile || error) {
+    return (
+      <AdminProfileError
+        message={error}
+        onRetry={reload}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  if (!pathAllowed) {
+    // The effect above is navigating; keep the loader up so the blocked route's
+    // content never paints for a frame.
+    return <PageLoader label="Loading admin console" />;
+  }
+
+  // The notification provider sits above the shell so the shell (bell + sidebar
+  // counters) and the routed queue pages (per-row unread styling) read one list.
+  return (
+    <AdminNotificationsProvider>
+      <AdminShell>{children}</AdminShell>
+    </AdminNotificationsProvider>
+  );
+}
+
+/**
+ * Fail-closed state for an admin profile that could not be loaded.
+ *
+ * Without `assignedRole` we cannot tell which navigation or routes are allowed,
+ * so the console chrome is replaced by this card rather than falling back to
+ * every menu item. Log out is offered so a broken session is never a dead end.
+ */
+function AdminProfileError({
+  message,
+  onRetry,
+  onLogout,
+}: {
+  message: string | null;
+  onRetry: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <Box
+      sx={{
+        minHeight: "100dvh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        p: { xs: 2, sm: 3 },
+        bgcolor: "background.default",
+      }}
+    >
+      <Card variant="outlined" sx={{ borderRadius: 3, maxWidth: 480 }}>
+        <CardContent sx={{ p: 3 }}>
+          <Typography variant="h6" component="h1" gutterBottom>
+            Couldn&apos;t load your admin profile
+          </Typography>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {message ?? "Your administrator profile could not be loaded."}
+          </Alert>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Your role decides which parts of the console you can use, so the menu
+            stays hidden until it loads.
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <Button variant="contained" onClick={onRetry}>
+              Retry
+            </Button>
+            <Button variant="text" onClick={onLogout}>
+              Log out
+            </Button>
+          </Stack>
+        </CardContent>
+      </Card>
+    </Box>
+  );
+}
+
+/** Sign out of the console: clear the idle marker, drop the cookie, leave. */
+function useAdminLogout(): () => Promise<void> {
+  const router = useRouter();
+  const { logout } = useAuth();
+  return useCallback(async () => {
+    clearLastActive("admin");
+    await logout();
+    router.replace("/admin/login");
+  }, [logout, router]);
+}
+
+function AdminShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const { isAuthenticated, user } = useAuth();
+  const { profile } = useAdminProfile();
+  const { dashboardData } = useDashboardData();
 
   // ---- Real-time admin notifications --------------------------------------
-  const [wsToken, setWsToken] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
-  const [toast, setToast] = useState<NotificationRecord | null>(null);
-  const [unreadIncidentsCount, setUnreadIncidentsCount] = useState(0);
-  const [unreadDocumentsCount, setUnreadDocumentsCount] = useState(0);
-  const seenNotifIdsRef = useRef<Set<string>>(new Set());
+  // The list, socket, polling fallback and unread bookkeeping live in a provider
+  // mounted above the shell (context/AdminNotificationsContext.tsx) so the queue
+  // pages can style the same rows these badges count.
+  const {
+    notifications,
+    unreadCount,
+    unreadIncidentIds,
+    unreadDocumentIds,
+    unreadChatKeys,
+    toast,
+    dismissToast,
+    connectionStatus,
+    markNotificationRead,
+    markAllRead,
+  } = useAdminNotifications();
 
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      // Authenticate the socket and seed unread state from the server.
-      const token = await fetchAdminWsToken();
-      if (!cancelled) setWsToken(token);
-      const mine = await fetchMyNotifications();
-      if (!cancelled) {
-        setNotifications(mine);
-        // Seed the granular sidebar counters from already-unread items.
-        setUnreadIncidentsCount(
-          mine.filter(
-            (n) => n.notificationCategory === "incidentAlert" && !n.isRead,
-          ).length,
-        );
-        setUnreadDocumentsCount(
-          mine.filter(
-            (n) => n.notificationCategory === "documentUpdate" && !n.isRead,
-          ).length,
-        );
-        for (const n of mine) {
-          const id = n.notificationId ?? n._id ?? "";
-          if (id) seenNotifIdsRef.current.add(id);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleMessage = useCallback((data: unknown) => {
-    const message = data as { type?: string; notification?: NotificationRecord };
-    if (message?.type !== "notification" || !message.notification) return;
-    const incoming = message.notification;
-    const key = incoming.notificationId ?? incoming._id ?? "";
-    // Dedupe (a reconnect can redeliver an event we already surfaced).
-    if (!key || seenNotifIdsRef.current.has(key)) return;
-    seenNotifIdsRef.current.add(key);
-    setNotifications((prev) => [incoming, ...prev]);
-    // Bump the matching sidebar counter alongside the global bell.
-    if (incoming.notificationCategory === "incidentAlert") {
-      setUnreadIncidentsCount((c) => c + 1);
-    } else if (incoming.notificationCategory === "documentUpdate") {
-      setUnreadDocumentsCount((c) => c + 1);
-    }
-    setToast(incoming);
-    playNotificationSound();
-  }, []);
-
-  const { connectionStatus } = useWebSocket({
-    token: wsToken,
-    onMessage: handleMessage,
-  });
+  // Unread *records* per queue: a record with several unread notifications is
+  // counted once, so each number equals the number of bold rows in that queue.
+  const unreadIncidentsCount = unreadIncidentIds.size;
+  const unreadDocumentsCount = unreadDocumentIds.size;
+  const unreadChatCount = unreadChatKeys.size;
 
   // ---- Connection monitoring ---------------------------------------------
   const [browserOnline, setBrowserOnline] = useState<boolean>(
@@ -146,30 +256,6 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   // the real-time WebSocket is connected.
   const isOnline = browserOnline && connectionStatus === "connected";
 
-  const handleMarkRead = useCallback((id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.notificationId === id ? { ...n, isRead: true } : n)),
-    );
-    void updateNotification(id, { isRead: true });
-  }, []);
-
-  const handleMarkAllRead = useCallback(() => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-    void markAllNotificationsRead();
-  }, []);
-
-  const dismissToast = useCallback(() => setToast(null), []);
-
-  // Reset the granular sidebar counters once the admin lands on the page that
-  // consumes that queue (the records stay in the bell until marked read).
-  useEffect(() => {
-    if (pathname.startsWith("/admin/incidents")) {
-      setUnreadIncidentsCount(0);
-    }
-    if (pathname.startsWith("/admin/document-requests")) {
-      setUnreadDocumentsCount(0);
-    }
-  }, [pathname]);
   // ---- End real-time admin notifications ----------------------------------
 
   const [expanded, setExpanded] = useState(true);
@@ -181,11 +267,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   const handleMobileClose = () => setMobileOpen(false);
   const handleMobileOpen = () => setMobileOpen(true);
 
-  const handleLogout = useCallback(async () => {
-    clearLastActive("admin");
-    await logout();
-    router.replace("/admin/login");
-  }, [logout, router]);
+  const handleLogout = useAdminLogout();
 
   // Auto sign-out after 30 minutes of inactivity in the admin console.
   const { warningVisible, secondsRemaining, staySignedIn } = useIdleSession({
@@ -205,6 +287,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         onLogout={handleLogout}
         unreadIncidentsCount={unreadIncidentsCount}
         unreadDocumentsCount={unreadDocumentsCount}
+        unreadChatCount={unreadChatCount}
       />
 
       <AdminHeader
@@ -214,8 +297,8 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         pendingIncidents={dashboardData?.pendingIncidents ?? 0}
         notifications={notifications}
         unreadCount={unreadCount}
-        onMarkRead={handleMarkRead}
-        onMarkAllRead={handleMarkAllRead}
+        onMarkRead={markNotificationRead}
+        onMarkAllRead={markAllRead}
         online={isOnline}
         title={title}
       />
@@ -241,22 +324,14 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         onSignOut={handleLogout}
       />
 
-      {/* Real-time notification toast (top-right, 10s). */}
-      <Snackbar
-        open={toast !== null}
-        anchorOrigin={{ vertical: "top", horizontal: "right" }}
-        autoHideDuration={10000}
+      {/* Real-time notification toast (top-right): auto-closes after 10s, and
+          holds while the pointer or keyboard focus is on it. */}
+      <NotificationToast
+        notificationKey={toast?.notificationId ?? toast?._id ?? null}
+        body={toast?.messageBody ?? ""}
         onClose={dismissToast}
-      >
-        <Alert
-          severity="info"
-          variant="filled"
-          onClose={dismissToast}
-          sx={{ width: "100%", maxWidth: 400 }}
-        >
-          {toast?.messageBody ?? ""}
-        </Alert>
-      </Snackbar>
+        maxWidth={400}
+      />
     </Box>
     </OnlineStatusProvider>
   );
@@ -274,6 +349,7 @@ function getHeaderTitle(pathname: string): string {
   if (pathname.startsWith("/admin/officials")) return "Barangay Officials";
   if (pathname.startsWith("/admin/notifications")) return "Notifications";
   if (pathname.startsWith("/admin/chat-sessions")) return "Chat Sessions";
+  if (pathname.startsWith("/admin/legal")) return "Data Privacy & Terms";
   if (pathname.startsWith("/admin/settings")) return "Settings";
   return "Admin Dashboard";
 }

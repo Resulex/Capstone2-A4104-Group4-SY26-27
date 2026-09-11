@@ -18,6 +18,7 @@ import {
 } from "@/components/signup/AddressStep";
 import { StepHeader } from "@/components/signup/StepHeader";
 import { ApiError } from "@/lib/api";
+import { TERMS_VERSION } from "@/lib/resident";
 import {
   fetchSignupBarangay,
   registerResident,
@@ -25,17 +26,15 @@ import {
   type SignupPayload,
 } from "@/lib/signup";
 
-const SIGNUP_CONSENT_KEY = "kbc_signup_consent";
-
 type Step = "consent" | "basic" | "address";
 
 /**
  * Resident sign-up (`/signup`).
  *
- * Flow: Data Privacy & Agreements gate (must agree) → Step 1 Basic Information
- * → Step 2 Residential Address (auto-filled, read-only from the registration
- * system) → confirm → POST /auth/register → redirect to /login with a success
- * toast.
+ * Flow: Terms of Service & Data Privacy Policy gate (must agree) → Step 1 Basic
+ * Information → Step 2 Residential Address (auto-filled, read-only from the
+ * registration system) → confirm → POST /auth/register (records consent) →
+ * redirect to /login with a success toast.
  */
 export default function ResidentSignupPage() {
   const router = useRouter();
@@ -47,20 +46,12 @@ export default function ResidentSignupPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Skip the privacy gate if consent was already recorded, and prefetch the
-  // registration-system barangay that auto-fills the address step.
+  // Prefetch the registration-system barangay that auto-fills the address step.
+  // The legal gate is always shown first and requires agreement each visit.
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      try {
-        const accepted =
-          window.localStorage.getItem(SIGNUP_CONSENT_KEY) === "true";
-        if (!cancelled && accepted) setStep("basic");
-      } catch {
-        // ignore
-      }
-
       try {
         const list = await fetchSignupBarangay();
         if (!cancelled && list && list.length > 0) setBarangay(list[0]);
@@ -88,11 +79,6 @@ export default function ResidentSignupPage() {
   }, []);
 
   const handleConsentAgree = useCallback(() => {
-    try {
-      window.localStorage.setItem(SIGNUP_CONSENT_KEY, "true");
-    } catch {
-      // ignore
-    }
     setStep("basic");
   }, []);
 
@@ -118,6 +104,9 @@ export default function ResidentSignupPage() {
         barangayId: barangay._id,
         houseUnitNumber: values.houseUnitNumber,
         streetPurokName: values.streetPurokName,
+        // Consent given on the legal gate; recorded on the resident record.
+        acceptTerms: true,
+        termsVersion: TERMS_VERSION,
       };
 
       try {

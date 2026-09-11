@@ -13,10 +13,19 @@ export interface IApplicantDetails {
   emailAddress: string;
 }
 
+/** The admin/official who made a status change (name captured at change time). */
+export interface IDocumentChangeActor {
+  userId: string;
+  fullName: string;
+}
+
 export interface IDocumentTimeline {
   step: string;
   date: Date;
   status: string;
+  /** Admin note recorded with this transition. */
+  remarks?: string;
+  changedBy?: IDocumentChangeActor;
 }
 
 export interface IDocumentRequest extends Document {
@@ -29,7 +38,7 @@ export interface IDocumentRequest extends Document {
   currentStatus: DocumentCurrentStatus;
   expectedCompletionDate: Date;
   timeline: IDocumentTimeline[];
-  remarks?: string; // Admin note (e.g. approval/rejection remark)
+  remarks?: string; // Latest admin note (mirrors the newest timeline entry)
   dateRequested: Date;
   updatedAt: Date;
 }
@@ -43,11 +52,21 @@ const applicantDetailsSchema = new Schema<IApplicantDetails>(
   { _id: false }
 );
 
+const changeActorSchema = new Schema<IDocumentChangeActor>(
+  {
+    userId: { type: String, required: true, trim: true },
+    fullName: { type: String, required: true, trim: true },
+  },
+  { _id: false }
+);
+
 const timelineSchema = new Schema<IDocumentTimeline>(
   {
     step: { type: String, required: true, trim: true },
     date: { type: Date, required: true },
     status: { type: String, required: true, trim: true },
+    remarks: { type: String, trim: true },
+    changedBy: { type: changeActorSchema, required: false },
   },
   { _id: false }
 );

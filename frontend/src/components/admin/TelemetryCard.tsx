@@ -6,6 +6,8 @@ import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getTelemetryCardGradient } from "@/theme/theme";
 
 interface TelemetryCardProps {
   /** Human-readable label for the metric (e.g. "Pending Incidents"). */
@@ -24,6 +26,9 @@ interface TelemetryCardProps {
  * Reusable telemetry card showing a single dashboard metric with an icon
  * badge, a large value, and a descriptive label. When `href` is provided, the
  * whole card is a clickable link to that route.
+ *
+ * The card surface is a top-down wash of the shell header tint fading to
+ * white (high-contrast mode flattens it to white).
  */
 export function TelemetryCard({
   title,
@@ -32,12 +37,15 @@ export function TelemetryCard({
   color,
   href,
 }: TelemetryCardProps) {
+  const { highContrast } = useAccessibilityTheme();
+
   const card = (
     <Card
       variant="outlined"
       sx={{
         height: "100%",
         borderRadius: 3,
+        backgroundImage: getTelemetryCardGradient(highContrast),
         transition: "box-shadow 0.2s ease",
         "&:hover": { boxShadow: 3 },
       }}

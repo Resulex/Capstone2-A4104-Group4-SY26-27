@@ -18,9 +18,11 @@ import { DetailRow } from "@/components/resident/DetailRow";
 import { StatusChip } from "@/components/resident/StatusChip";
 import { EmptyState } from "@/components/resident/EmptyState";
 import { LoadingSkeleton } from "@/components/resident/LoadingSkeleton";
+import { TimelineSteps } from "@/components/shared/TimelineSteps";
 import { IncidentRecord } from "@/lib/admin";
 import { fetchIncidentReport, formatDateTime } from "@/lib/resident";
 import { isImageUrl, isVideoUrl, fileNameOf } from "@/lib/uploads";
+import { useResidentDashboard } from "@/context/ResidentDashboardContext";
 
 /**
  * Incident Report Details (`/incidents/{id}`).
@@ -31,6 +33,7 @@ import { isImageUrl, isVideoUrl, fileNameOf } from "@/lib/uploads";
  */
 export default function IncidentDetailsPage() {
   const params = useParams<{ id: string }>();
+  const { unreadIncidentIds, markRecordsRead } = useResidentDashboard();
   const id = params.id;
 
   const [report, setReport] = useState<IncidentRecord | null>(null);
@@ -47,6 +50,13 @@ export default function IncidentDetailsPage() {
       cancelled = true;
     };
   }, [id]);
+
+  // Opening the report is what marks it seen — the resident is looking at it.
+  // Re-runs if a fresh update lands while the page is open, since the shell's
+  // push/poll changes `unreadIncidentIds`.
+  useEffect(() => {
+    if (unreadIncidentIds.has(id)) markRecordsRead([id]);
+  }, [id, unreadIncidentIds, markRecordsRead]);
 
   return (
     <Box sx={{ maxWidth: 860, mx: "auto" }}>
@@ -180,6 +190,26 @@ export default function IncidentDetailsPage() {
                   label="Incident Status"
                   value={<StatusChip status={report.incidentStatus} />}
                 />
+                {report.duplicateOfIncidentId && (
+                  <DetailRow
+                    label="Duplicate Of"
+                    value={
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {report.duplicateOfIncidentId}
+                      </Typography>
+                    }
+                  />
+                )}
+                {report.remarks && (
+                  <DetailRow
+                    label="Remarks"
+                    value={
+                      <Typography variant="body2" sx={{ fontStyle: "italic" }}>
+                        {report.remarks}
+                      </Typography>
+                    }
+                  />
+                )}
                 <DetailRow
                   label="Reported At"
                   value={formatDateTime(report.reportedAt)}
@@ -283,6 +313,24 @@ export default function IncidentDetailsPage() {
               </CardContent>
             </Card>
           </Grid>
+
+          {/* Status history — one entry per status change, with any remark. */}
+          {report.timeline && report.timeline.length > 0 && (
+            <Grid item xs={12}>
+              <Card variant="outlined" sx={{ borderRadius: 3 }}>
+                <CardContent sx={{ p: { xs: 2.5, sm: 3 } }}>
+                  <Typography
+                    variant="h6"
+                    component="h2"
+                    sx={{ fontWeight: 700, mb: 2 }}
+                  >
+                    Status History
+                  </Typography>
+                  <TimelineSteps steps={report.timeline} currentStatus={report.incidentStatus} />
+                </CardContent>
+              </Card>
+            </Grid>
+          )}
         </Grid>
       )}
     </Box>

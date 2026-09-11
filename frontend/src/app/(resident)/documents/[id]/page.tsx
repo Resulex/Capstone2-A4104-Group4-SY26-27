@@ -12,11 +12,12 @@ import Link from "next/link";
 import PersonIcon from "@mui/icons-material/Person";
 import { PageHeader } from "@/components/resident/PageHeader";
 import { DetailRow } from "@/components/resident/DetailRow";
-import { TimelineSteps } from "@/components/resident/TimelineSteps";
+import { TimelineSteps } from "@/components/shared/TimelineSteps";
 import { StatusChip } from "@/components/resident/StatusChip";
 import { EmptyState } from "@/components/resident/EmptyState";
 import { LoadingSkeleton } from "@/components/resident/LoadingSkeleton";
 import { useResident } from "@/context/ResidentContext";
+import { useResidentDashboard } from "@/context/ResidentDashboardContext";
 import {
   DocumentRequestDetail,
   fetchDocumentRequest,
@@ -34,6 +35,7 @@ import { isImageUrl, fileNameOf } from "@/lib/uploads";
 export default function DocumentRequestDetailsPage() {
   const params = useParams<{ id: string }>();
   const { profile } = useResident();
+  const { unreadDocumentIds, markRecordsRead } = useResidentDashboard();
   const id = params.id;
 
   const [request, setRequest] = useState<DocumentRequestDetail | null>(null);
@@ -51,6 +53,13 @@ export default function DocumentRequestDetailsPage() {
       cancelled = true;
     };
   }, [id]);
+
+  // Opening the request is what marks it seen — the resident is looking at it.
+  // Re-runs if a fresh update lands while the page is open, since the shell's
+  // push/poll changes `unreadDocumentIds`.
+  useEffect(() => {
+    if (unreadDocumentIds.has(id)) markRecordsRead([id]);
+  }, [id, unreadDocumentIds, markRecordsRead]);
 
   // Resolve the barangay ObjectId on the profile to its display name so the
   // address shows the barangay name instead of a raw database id.
@@ -234,7 +243,7 @@ export default function DocumentRequestDetailsPage() {
                   Timeline Progress
                 </Typography>
                 {request.timeline && request.timeline.length > 0 ? (
-                  <TimelineSteps steps={request.timeline} />
+                  <TimelineSteps steps={request.timeline} currentStatus={request.currentStatus} />
                 ) : (
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                     <Typography variant="body2" color="text.secondary">

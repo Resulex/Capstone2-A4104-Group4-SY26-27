@@ -22,12 +22,31 @@ provider:
     MONGODB_URI: ${env:MONGODB_URI, ''}
     JWT_SECRET: ${env:JWT_SECRET, ''}
     JWT_EXPIRES_IN: ${env:JWT_EXPIRES_IN, '7d'}
+    # Optional dedicated signing key for the resident Google SSO `state` value.
+    # Leave empty to fall back to JWT_SECRET (see src/shared/oauth-state.ts).
+    OAUTH_STATE_SECRET: ${env:OAUTH_STATE_SECRET, ''}
     NODE_ENV: production
     # Admin MFA (TOTP) via Google Authenticator
     TOTP_ISSUER: ${env:TOTP_ISSUER, 'KaBarangayConnect'}
     TOTP_SECRET_ENCRYPTION_KEY: ${env:TOTP_SECRET_ENCRYPTION_KEY, ''}
     # Short-lived enrollment JWT issued pre-MFA-enrollment for TOTP setup
     TOTP_ENROLLMENT_JWT_TTL: ${env:TOTP_ENROLLMENT_JWT_TTL, '10m'}
+    # Admin auth via AWS Cognito User Pool (software-token TOTP). Set
+    # COGNITO_OFFLINE=true to run against the in-process dev stub instead of a
+    # live pool (serverless-offline also sets IS_OFFLINE, which the gateway
+    # accepts). Without the pool id/client id, deployed Lambdas cannot reach
+    # Cognito and admin login fails closed.
+    COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, ''}
+    COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID, ''}
+    COGNITO_REGION: ${env:COGNITO_REGION, ''}
+    COGNITO_OFFLINE: ${env:COGNITO_OFFLINE, 'false'}
+    # Admin password-reset email, sent by the backend via Amazon SES. The From
+    # address must be a VERIFIED SES identity in SES_REGION, and in the SES
+    # sandbox only verified recipient addresses receive mail.
+    SES_FROM_ADDRESS: ${env:SES_FROM_ADDRESS, 'alexmotorph.noreply@gmail.com'}
+    SES_REGION: ${env:SES_REGION, 'ap-southeast-1'}
+    # Frontend origin used to build the reset link in the email.
+    APP_BASE_URL: ${env:APP_BASE_URL, 'http://localhost:8000'}
     # Resident Google SSO
     GOOGLE_CLIENT_ID: ${env:GOOGLE_CLIENT_ID, ''}
     GOOGLE_CLIENT_SECRET: ${env:GOOGLE_CLIENT_SECRET, ''}
@@ -35,6 +54,15 @@ provider:
     # Media uploads (S3 presigned URLs — see src/shared/s3.ts)
     S3_BUCKET_NAME: ${env:S3_BUCKET_NAME, 'kabarangayconnect-media'}
     S3_BUCKET_REGION: ${env:S3_BUCKET_REGION, 'ap-southeast-1'}
+    # Management-API endpoint the notification broadcast targets
+    # (see src/shared/ws.ts). `broadcastToAdmin` is a safe no-op while this is
+    # empty, so the HTTP feature set keeps working without a WebSocket API.
+    # - Local (`serverless offline`): http://localhost:3001 (matches
+    #   `custom.serverless-offline.websocketPort` below).
+    # - Deployed: wss://<api-id>.execute-api.<region>.amazonaws.com/<stage>,
+    #   i.e. the WebSocket API created by the `ws-*` functions at the bottom of
+    #   this file. Leave it empty in CI until real-time push is wanted.
+    WEBSOCKET_ENDPOINT: ${env:WEBSOCKET_ENDPOINT, ''}
 
   # IAM role for the Lambda functions. S3 permissions below let the
   # presign handler sign PUT/GET requests against the media bucket.
@@ -48,6 +76,26 @@ provider:
             - s3:DeleteObject
           Resource:
             - arn:aws:s3:::${env:S3_BUCKET_NAME, 'kabarangayconnect-media'}/*
+        # Admin password-reset email (src/shared/email.ts).
+        - Effect: Allow
+          Action:
+            - ses:SendEmail
+            - ses:SendRawEmail
+          # identity/* on purpose: SES authorizes SendEmail against the
+          # identity ARNs involved, and a denial has been observed naming the
+          # RECIPIENT identity, not just SES_FROM_ADDRESS. Scoping to the sender
+          # alone breaks delivery. Replace with an explicit list once the set of
+          # sending/recipient identities is fixed.
+          Resource:
+            - "arn:aws:ses:${env:SES_REGION, 'ap-southeast-1'}:*:identity/*"
+        # Push notifications to live WebSocket connections. Dormant until
+        # WEBSOCKET_ENDPOINT is set (src/shared/ws.ts returns null without it),
+        # but the role must carry it or deployed pushes fail with AccessDenied.
+        - Effect: Allow
+          Action:
+            - execute-api:ManageConnections
+          Resource:
+            - "arn:aws:execute-api:${env:AWS_REGION, 'ap-southeast-1'}:*:*"
 
 plugins:
   - serverless-esbuild
@@ -71,9 +119,30 @@ custom:
     # Each function-per-use-case handler is bundled independently.
     packager: npm
     watch: true
+    # DO NOT REMOVE — the plugin's cleanup() hook deletes the `.esbuild` work
+    # folder after `package`/`deploy`. That folder is also the handler
+    # `location` a running `serverless-offline` resolves against, so a deploy
+    # issued while offline is up wipes the bundles and every later request
+    # fails with `Runtime.ImportModuleError: Cannot find module 'handler'`.
+    # Keeping the output directory makes offline immune to a concurrent
+    # deploy. `.esbuild/` is git-ignored.
+    keepOutputDirectory: true
   serverless-offline:
     port: 3000
-    reloadHandler: true
+    # WebSocket emulation port. MUST match NEXT_PUBLIC_WEBSOCKET_URL in
+    # frontend/.env — `verify:routes` fails on a mismatch. Note this is NOT
+    # `lambdaPort` (default 3002), which is an HTTP Lambda-invoke endpoint and
+    # answers a WS handshake with `404`.
+    websocketPort: 3001
+    # DO NOT SET `reloadHandler: true` HERE. serverless-offline runs Node
+    # handlers in a *worker thread* (`useInProcess` defaults to false), and with
+    # reloadHandler on, `LambdaFunctionPool.get()` never reuses an idle worker:
+    # it builds a fresh LambdaFunction -- hence a fresh worker and a fresh module
+    # registry -- for EVERY request. That rebuilds the module-level connection
+    # cache in `src/config/db.ts`, so every request paid a full Mongoose connect
+    # (SRV DNS + TLS + auth) to Atlas: measured ~1.6s for a single read and
+    # 5-6s under a burst. Leave it off and use `npm run offline:reload` when you
+    # genuinely need handler code reloaded per request.
 
 functions:
   # ---------------------------------------------------------------------------
@@ -103,6 +172,117 @@ functions:
           path: auth/admin/login
           method: post
           cors: true
+
+  # ---------------------------------------------------------------------------
+  # Auth — Admin Login MFA (step 2: authenticator code)
+  # Use-case: answer the Cognito SOFTWARE_TOKEN_MFA challenge with the 6-digit
+  # TOTP code from the admin's authenticator app; issues the session JWT.
+  # Public: the short-lived challenge `session` replaces the password, so no
+  # authorizer is attached.
+  # Handler: src/features/auth/admin-login/mfa-handler.ts
+  # API:     POST /auth/admin/login/mfa
+  # DO NOT REMOVE — enforced by `npm run verify:routes` (prebuild/predeploy).
+  # ---------------------------------------------------------------------------
+  auth-admin-login-mfa:
+    handler: src/features/auth/admin-login/mfa-handler.handler
+    events:
+      - http:
+          path: auth/admin/login/mfa
+          method: post
+          cors: true
+
+  # ---------------------------------------------------------------------------
+  # Auth — Admin Login TOTP Setup / Verify (first-login enrollment, steps 2a/2b)
+  # Use-case: AssociateSoftwareToken → otpauth URI for the QR code, then
+  # VerifySoftwareToken + enable the software-token MFA preference. Public: the
+  # MFA_SETUP `session` replaces the password, so no authorizer is attached.
+  # Handler: src/features/auth/admin-login/totp-handler.ts
+  # API:     POST /auth/admin/login/totp/setup
+  #          POST /auth/admin/login/totp/verify
+  # DO NOT REMOVE — enforced by `npm run verify:routes` (prebuild/predeploy).
+  # ---------------------------------------------------------------------------
+  auth-admin-login-totp-setup:
+    handler: src/features/auth/admin-login/totp-handler.setupTotpHandler
+    events:
+      - http:
+          path: auth/admin/login/totp/setup
+          method: post
+          cors: true
+
+  auth-admin-login-totp-verify:
+    handler: src/features/auth/admin-login/totp-handler.verifyTotpHandler
+    events:
+      - http:
+          path: auth/admin/login/totp/verify
+          method: post
+          cors: true
+
+  # ---------------------------------------------------------------------------
+  # Auth — Admin Login New Password (first sign-in with the emailed temp password)
+  # Use-case: answer the Cognito NEW_PASSWORD_REQUIRED challenge so a newly
+  # provisioned admin can choose their own password before MFA enrollment.
+  # Public: the short-lived challenge `session` replaces the password, so no
+  # authorizer is attached.
+  # Handler: src/features/auth/admin-login/new-password/handler.ts
+  # API:     POST /auth/admin/login/new-password
+  # DO NOT REMOVE — enforced by `npm run verify:routes` (prebuild/predeploy).
+  # ---------------------------------------------------------------------------
+  auth-admin-login-new-password:
+    handler: src/features/auth/admin-login/new-password/handler.handler
+    events:
+      - http:
+          path: auth/admin/login/new-password
+          method: post
+          cors: true
+
+  # ---------------------------------------------------------------------------
+  # Auth — Admin Forgot Password (Cognito built-in reset flow)
+  # Use-case: email a 6-digit recovery code, then set the new password.
+  # Handler: src/features/auth/admin-forgot/handler.ts
+  # API:     POST /auth/admin/forgot-password
+  #          POST /auth/admin/forgot-password/confirm
+  # Public by design (the user cannot authenticate); the request step always
+  # reports the same generic outcome to avoid account enumeration.
+  # DO NOT REMOVE — enforced by `npm run verify:routes` (prebuild/predeploy).
+  # ---------------------------------------------------------------------------
+  auth-admin-forgot-password:
+    handler: src/features/auth/admin-forgot/handler.forgotPasswordHandler
+    events:
+      - http:
+          path: auth/admin/forgot-password
+          method: post
+          cors: true
+
+  auth-admin-forgot-password-confirm:
+    handler: src/features/auth/admin-forgot/handler.confirmPasswordResetHandler
+    events:
+      - http:
+          path: auth/admin/forgot-password/confirm
+          method: post
+          cors: true
+
+  # ---------------------------------------------------------------------------
+  # Auth — Admin Change Password (self-service)
+  # Use-case: the signed-in admin changes their OWN password by supplying the
+  # current one, which is verified against Cognito before anything is applied.
+  # Self-scoped to the JWT subject — PATCH /admins/{id} stays the
+  # admin-management route (a SUPER_ADMIN reset has no current password).
+  # Handler: src/features/auth/admin-password/handler.ts
+  # API:     PATCH /auth/admin/password  (admin only)
+  # DO NOT REMOVE — enforced by `npm run verify:routes` (prebuild/predeploy).
+  # ---------------------------------------------------------------------------
+  auth-admin-password:
+    handler: src/features/auth/admin-password/handler.handler
+    events:
+      - http:
+          path: auth/admin/password
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
 
   # ---------------------------------------------------------------------------
   # Auth — Admin TOTP Setup
@@ -169,6 +349,58 @@ functions:
           path: auth/resident/google/callback
           method: get
           cors: true
+
+  # ---------------------------------------------------------------------------
+  # Auth — WebSocket session tokens
+  # Use-case: surface the httpOnly `kbc_token` session JWT so client-side JS can
+  # open an authenticated WebSocket (`?token=<jwt>`). Cookie-authenticated, so
+  # no authorizer is attached; each handler answers 401 when the cookie is
+  # missing.
+  # Handler: src/features/auth/admin-ws-token/handler.ts
+  #          src/features/auth/resident-ws-token/handler.ts
+  # API:     GET /auth/admin/ws-token
+  #          GET /auth/resident/ws-token
+  # DO NOT REMOVE — enforced by `npm run verify:routes` (prebuild/predeploy).
+  # ---------------------------------------------------------------------------
+  auth-admin-ws-token:
+    handler: src/features/auth/admin-ws-token/handler.handler
+    events:
+      - http:
+          path: auth/admin/ws-token
+          method: get
+          cors: true
+
+  auth-resident-ws-token:
+    handler: src/features/auth/resident-ws-token/handler.handler
+    events:
+      - http:
+          path: auth/resident/ws-token
+          method: get
+          cors: true
+
+  # ---------------------------------------------------------------------------
+  # Auth — Session Validity
+  # Use-case: confirm the httpOnly `kbc_token` cookie still holds a valid,
+  # unexpired JWT and report the caller's authoritative role + resident consent.
+  # The frontend's `/api/auth/me` route delegates here instead of decoding the
+  # cookie payload itself (a bare decode cannot detect expiry or tampering).
+  # Attaches the authorizer, so a bad token is rejected before the handler runs.
+  # Handler: src/features/auth/session/handler.ts
+  # API:     GET /auth/session
+  # DO NOT REMOVE — enforced by `npm run verify:routes` (prebuild/predeploy).
+  # ---------------------------------------------------------------------------
+  auth-session:
+    handler: src/features/auth/session/handler.handler
+    events:
+      - http:
+          path: auth/session
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
 
   # ---------------------------------------------------------------------------
   # Auth — Login
@@ -299,6 +531,20 @@ functions:
     events:
       - http:
           path: residents/{id}
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  # Self-scoped consent lookup used by the resident portal gate. Three path
+  # segments, so it cannot collide with `residents/{id}`.
+  residents-my-consent:
+    handler: src/features/residents/me-consent/handler.handler
+    events:
+      - http:
+          path: residents/me/consent
           method: get
           cors: true
           authorizer:
@@ -864,6 +1110,47 @@ functions:
             type: REQUEST
             resultTtlInSeconds: 0
             identitySource: method.request.header.Authorization
+  # Caller-scoped notification feeds (admin bell/badge + resident notification
+  # center). The handlers live in `notifications/{mine,read-all}/` and MUST be
+  # registered here — without these blocks the whole notification panel 404s.
+  notifications-mine:
+    handler: src/features/notifications/mine/handler.handler
+    events:
+      - http:
+          path: notifications/mine
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  notifications-read-all:
+    handler: src/features/notifications/read-all/handler.handler
+    events:
+      - http:
+          path: notifications/read-all
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  # Bulk read-state for every notification pointing at a set of records, so the
+  # admin queues can mark a row seen in one call (see read-by-reference/handler).
+  notifications-read-by-reference:
+    handler: src/features/notifications/read-by-reference/handler.handler
+    events:
+      - http:
+          path: notifications/read-by-reference
+          method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
 
   # ---------------------------------------------------------------------------
   # Barangays — CRUD
@@ -946,3 +1233,34 @@ functions:
   # ---------------------------------------------------------------------------
   auth-jwt:
     handler: src/features/auth/authorizer/handler.handler
+
+  # ---------------------------------------------------------------------------
+  # WebSocket API — real-time admin/resident notifications
+  # These three blocks are the ONLY thing that registers the WebSocket routes.
+  # Without them serverless-offline starts no WS server (`ws://localhost:3002`
+  # is the HTTP lambdaPort and answers the handshake with 404) and no deployed
+  # WebSocket API exists at all. Auth is handled inside `$connect` via
+  # `?token=<JWT>` (see src/features/ws/connect/handler.ts), so no authorizer.
+  # `verify:routes` pins all three so they cannot silently disappear.
+  # ---------------------------------------------------------------------------
+  # API:     $connect    (open a connection)
+  # Handler: src/features/ws/connect/handler.ts
+  ws-connect:
+    handler: src/features/ws/connect/handler.handler
+    events:
+      - websocket:
+          route: $connect
+  # API:     $disconnect (forget the closed connection)
+  # Handler: src/features/ws/disconnect/handler.ts
+  ws-disconnect:
+    handler: src/features/ws/disconnect/handler.handler
+    events:
+      - websocket:
+          route: $disconnect
+  # API:     $default    (inbound client messages — unused, push-only)
+  # Handler: src/features/ws/default/handler.ts
+  ws-default:
+    handler: src/features/ws/default/handler.handler
+    events:
+      - websocket:
+          route: $default

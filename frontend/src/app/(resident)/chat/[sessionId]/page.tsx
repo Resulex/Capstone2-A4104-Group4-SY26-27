@@ -11,6 +11,7 @@ import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import SendIcon from "@mui/icons-material/Send";
 import { ChatMessageRecord, searchMessages, sendMessage } from "@/lib/admin";
 import { newId } from "@/lib/resident";
+import { useResidentDashboard } from "@/context/ResidentDashboardContext";
 import { ChatBubble } from "@/components/resident/ChatBubble";
 import { PageHeader } from "@/components/resident/PageHeader";
 import { EmptyState } from "@/components/resident/EmptyState";
@@ -43,6 +44,7 @@ function mergeMessages(
 export default function ChatThreadPage() {
   const params = useParams<{ sessionId: string }>();
   const sessionId = params.sessionId;
+  const { data, unreadChatKeys, markRecordsRead } = useResidentDashboard();
 
   const [messages, setMessages] = useState<ChatMessageRecord[]>([]);
   const [text, setText] = useState("");
@@ -74,23 +76,85 @@ export default function ChatThreadPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length]);
 
+  // The resident is looking at this thread, so anything unread for the session
+  // clears — including replies that arrive while the page is open, because the
+  // shell's push/poll adds the notification and changes `unreadChatKeys`.
+  // Notifications may carry the session id or the incident's Mongo `_id`, so
+  // every id the session is addressable by is accepted.
+  useEffect(() => {
+    const session = data.chatSessions.find((s) => s.sessionId === sessionId);
+    if (!session) return;
+    const keys = [session.sessionId, session._id, session.incidentId].filter(
+      (key): key is string => typeof key === "string" && unreadChatKeys.has(key),
+    );
+    if (keys.length > 0) markRecordsRead(keys);
+  }, [data.chatSessions, sessionId, unreadChatKeys, markRecordsRead]);
+
+  /** POST the message and reconcile the optimistic echo with the server copy. */
+  const deliver = useCallback(
+    async (messageId: string, messageText: string) => {
+      setSending(true);
+      try {
+        const created = await sendMessage({
+          messageId,
+          sessionId,
+          messageText,
+        });
+        // Same `messageId`, so this replaces the echo instead of duplicating it.
+        setMessages((prev) => mergeMessages(prev, [created]));
+        setError(null);
+      } catch (err) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.messageId === messageId
+              ? { ...m, pending: false, failed: true }
+              : m,
+          ),
+        );
+        setError(
+          err instanceof Error ? err.message : "Could not send message.",
+        );
+      } finally {
+        setSending(false);
+      }
+    },
+    [sessionId],
+  );
+
   const handleSend = async () => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
-    setSending(true);
-    try {
-      const created = await sendMessage({
-        messageId: newId(),
-        sessionId,
-        messageText: trimmed,
-      });
-      setMessages((prev) => mergeMessages(prev, [created]));
-      setText("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send message.");
-    } finally {
-      setSending(false);
-    }
+    const messageId = newId();
+    // Render the bubble immediately; the response and the 5s poll both merge by
+    // `messageId`, so the echo is replaced by the server record rather than
+    // shown twice.
+    setMessages((prev) =>
+      mergeMessages(prev, [
+        {
+          messageId,
+          sessionId,
+          senderId: "",
+          isUser: true,
+          messageText: trimmed,
+          sentTimestamp: new Date().toISOString(),
+          pending: true,
+        },
+      ]),
+    );
+    setText("");
+    await deliver(messageId, trimmed);
+  };
+
+  const handleRetry = (message: ChatMessageRecord) => {
+    if (sending) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.messageId === message.messageId
+          ? { ...m, pending: true, failed: false }
+          : m,
+      ),
+    );
+    void deliver(message.messageId, message.messageText);
   };
 
   return (
@@ -142,6 +206,9 @@ export default function ChatThreadPage() {
               timestamp={message.sentTimestamp ?? message.createdAt}
               isUser={Boolean(message.isUser)}
               urgency={Boolean(message.urgencyFlag)}
+              pending={message.pending}
+              failed={message.failed}
+              onRetry={() => handleRetry(message)}
             />
           ))
         )}
@@ -180,6 +247,14 @@ export default function ChatThreadPage() {
           placeholder="Type a message..."
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={(event) => {
+            // Enter sends (as in the admin thread); Shift+Enter keeps the
+            // newline, which is what the multiline composer is here for.
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              void handleSend();
+            }
+          }}
           inputProps={{ "aria-label": "Message" }}
           multiline
           maxRows={3}

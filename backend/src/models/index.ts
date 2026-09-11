@@ -9,10 +9,13 @@ export {
   type IDocumentRequest,
   type IApplicantDetails,
   type IDocumentTimeline,
+  type IDocumentChangeActor,
 } from './document-request.model';
 export {
   IncidentReport,
   type IIncidentReport,
+  type IIncidentTimeline,
+  type IIncidentChangeActor,
 } from './incident-report.model';
 export { ChatSession, type IChatSession, type IDeviceInfo } from './chat-session.model';
 export { Message, type IMessage } from './message.model';

@@ -13,6 +13,7 @@ import { useAccessibilityTheme } from "@/context/ThemeContext";
 import { FONT_SCALE_OPTIONS, FontScale } from "@/theme/theme";
 
 const FONT_SCALE_LABELS: Record<FontScale, string> = {
+  xs: "Extra Small",
   small: "Small",
   default: "Default",
   large: "Large",
