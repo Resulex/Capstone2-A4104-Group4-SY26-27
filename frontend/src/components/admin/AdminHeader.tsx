@@ -20,7 +20,11 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import { AccessibilityControls } from "@/components/AccessibilityControls";
 import { WebSocketStatus } from "@/components/admin/WebSocketStatus";
 import { SIDEBAR_WIDTH } from "@/components/admin/AdminSidebar";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getShellColors } from "@/theme/theme";
 import { NotificationRecord } from "@/lib/admin";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getShellColors } from "@/theme/theme";
 
 interface AdminHeaderProps {
   /** Whether the desktop drawer is expanded. */
@@ -63,6 +67,8 @@ export function AdminHeader({
   online,
   title,
 }: AdminHeaderProps) {
+  const { highContrast } = useAccessibilityTheme();
+  const shell = getShellColors(highContrast);
   const [bellAnchor, setBellAnchor] = useState<HTMLElement | null>(null);
   const unread = notifications.filter((n) => !n.isRead);
 
@@ -80,7 +86,7 @@ export function AdminHeader({
         ml: { md: `${SIDEBAR_WIDTH}px` },
         borderBottom: 1,
         borderColor: "divider",
-        bgcolor: "background.paper",
+        bgcolor: shell.header,
         zIndex: (theme) => theme.zIndex.drawer + 1,
       }}
     >
@@ -104,7 +110,11 @@ export function AdminHeader({
           <MenuIcon />
         </IconButton>
 
-        <Typography variant="h6" component="h1" sx={{ flexGrow: 1 }}>
+        <Typography
+          variant="h6"
+          component="h1"
+          sx={{ flexGrow: 1, color: shell.headerText }}
+        >
           {title}
         </Typography>
 

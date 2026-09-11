@@ -1,8 +1,17 @@
 /* Reset handled by MUI CssBaseline.
    This file exists only for global custom properties and font declarations. */
-:root {
-  --font-roboto: var(--font-roboto, "Roboto", sans-serif);
-}
+
+/*
+ * Do NOT declare `--font-inter` here.
+ *
+ * `next/font` already defines it on <html> through the generated
+ * `.inter_*__variable` class (see src/app/layout.tsx). Re-declaring it on
+ * `:root` as `var(--font-inter, ...)` — as this file previously did for
+ * Roboto — is a self-referential custom property. CSS resolves that as a
+ * cycle, so the variable becomes invalid at computed-value time, which in
+ * turn invalidates every `font-family: var(--font-inter), ...` declaration
+ * and drops the whole app to the browser's default serif font.
+ */
 
 @media (prefers-reduced-motion: reduce) {
   *,

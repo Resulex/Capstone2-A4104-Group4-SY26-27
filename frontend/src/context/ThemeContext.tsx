@@ -26,7 +26,14 @@ export interface AccessibilityThemeContextValue {
 const AccessibilityThemeContext =
   createContext<AccessibilityThemeContextValue | null>(null);
 
-const FONT_SCALE_ORDER: FontScale[] = ["small", "default", "large", "xl", "xxl"];
+const FONT_SCALE_ORDER: FontScale[] = [
+  "xs",
+  "small",
+  "default",
+  "large",
+  "xl",
+  "xxl",
+];
 
 const FONT_SCALE_STORAGE_KEY = "kbc_font_scale";
 const HIGH_CONTRAST_STORAGE_KEY = "kbc_high_contrast";

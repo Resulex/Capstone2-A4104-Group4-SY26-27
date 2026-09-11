@@ -8,7 +8,7 @@ import path from 'path';
 // them in the `schema_migrations` changelog so they run exactly once.
 
 const MIGRATIONS_DIR = path.resolve(process.cwd(), 'src', 'migrations');
-const CHANGELOG = 'schema_migrations';
+export const CHANGELOG = 'schema_migrations';
 const SAMPLE_NAME = 'sample-migration.ts';
 
 type MigrationFn = (db: unknown) => Promise<void>;
@@ -46,6 +46,16 @@ function isMigrationFile(name: string): boolean {
   );
 }
 
+/**
+ * Migration files in the order the runner applies them.
+ *
+ * Exported so `verify-migrations.ts` checks exactly the same set the runner
+ * would apply, rather than a second copy of this filter that can drift.
+ */
+export async function listMigrationFiles(): Promise<string[]> {
+  return (await fs.readdir(MIGRATIONS_DIR)).filter(isMigrationFile).sort();
+}
+
 async function getApplied(conn: mongoose.Connection): Promise<string[]> {
   const collection = getDb(conn).collection(CHANGELOG);
   const docs = await collection.find({}, { projection: { fileName: 1 } }).toArray();
@@ -74,7 +84,7 @@ async function loadMigration(fileName: string): Promise<MigrationModule> {
 export async function runUp(): Promise<string[]> {
   const conn = await connect();
   try {
-    const files = (await fs.readdir(MIGRATIONS_DIR)).filter(isMigrationFile).sort();
+    const files = await listMigrationFiles();
     const applied = new Set(await getApplied(conn));
     const migrated: string[] = [];
 
@@ -97,7 +107,7 @@ export async function runUp(): Promise<string[]> {
 export async function runDown(steps = 1): Promise<string[]> {
   const conn = await connect();
   try {
-    const files = (await fs.readdir(MIGRATIONS_DIR)).filter(isMigrationFile).sort().reverse();
+    const files = (await listMigrationFiles()).reverse();
     const applied = new Set(await getApplied(conn));
     const reverted: string[] = [];
     let count = 0;
@@ -123,7 +133,7 @@ export async function runDown(steps = 1): Promise<string[]> {
 export async function runStatus(): Promise<void> {
   const conn = await connect();
   try {
-    const files = (await fs.readdir(MIGRATIONS_DIR)).filter(isMigrationFile).sort();
+    const files = await listMigrationFiles();
     const applied = new Set(await getApplied(conn));
 
     console.log('Filename | Applied At');

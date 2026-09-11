@@ -1,5 +1,4 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
-import crypto from 'node:crypto';
 import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
@@ -7,6 +6,7 @@ import { unauthorizedError } from '../../../shared/errors';
 import { Resident } from '../../../models';
 import { signToken } from '../../../shared/auth';
 import { buildGoogleAuthUrl, exchangeCodeForTokens, verifyGoogleIdToken } from '../../../shared/google';
+import { createOAuthState, verifyOAuthState } from '../../../shared/oauth-state';
 
 // ---------------------------------------------------------------------------
 // Start — redirect the resident to Google's consent screen
@@ -18,14 +18,16 @@ import { buildGoogleAuthUrl, exchangeCodeForTokens, verifyGoogleIdToken } from '
  *
  * GET /auth/resident/google
  *
- * `state` is an opaque CSRF token the client persists and echoes back on the
- * callback; in a browser flow this is typically stored in an HTTP-only cookie.
+ * `state` is a signed, opaque CSRF token minted by {@link createOAuthState} and
+ * validated on the callback. It is deliberately not cookie-backed: the callback
+ * is navigated to the backend origin by Google, which differs from the
+ * frontend origin in production (see `shared/oauth-state.ts`).
  */
 export async function startGoogleLogin(
-  event: APIGatewayProxyEvent,
+  _event: APIGatewayProxyEvent,
   _context: Context
 ): Promise<APIGatewayProxyResult> {
-  const state = crypto.randomBytes(16).toString('hex');
+  const state = createOAuthState();
   const authUrl = buildGoogleAuthUrl(state);
   return ok({ authUrl, state }, 'Redirect the user to the Google sign-in page.');
 }
@@ -50,7 +52,12 @@ export async function googleLoginCallback(
   _context: Context
 ): Promise<APIGatewayProxyResult> {
   const query = event.queryStringParameters || {};
-  const { code, error } = query;
+  const { code, error, state } = query;
+
+  // Validate the signed `state` BEFORE acting on anything else: an unsigned or
+  // tampered callback is rejected outright instead of being evaluated. Google
+  // echoes `state` on its error redirect too, so this runs for both paths.
+  verifyOAuthState(state);
 
   if (error) {
     return ok({ success: false, error }, 'Google sign-in was cancelled.');
@@ -88,7 +95,7 @@ export async function googleLoginCallback(
     });
   }
 
-  let isNewResident = !resident;
+  const isNewResident = !resident;
 
   // 3) Provision or link in a single atomic upsert. On first-time login this
   //    inserts a minimal record (the resident completes the remaining PII —
@@ -129,6 +136,9 @@ export async function googleLoginCallback(
   const payload = {
     token,
     user: resident.toPublicJSON(),
+    // Echoed back so the opener window can confirm this callback belongs to the
+    // authorization attempt it started, and not one injected by another page.
+    state,
     isNewUser: isNewResident,
     isNewResident,
     profileComplete: resident.isProvisioned,
@@ -161,7 +171,7 @@ export async function googleLoginCallback(
           document.body.textContent = 'This window should be opened from the KaBarangayConnect login page.';
         }
       })();
-    <\/script>
+    </script>
   </body>
 </html>`;
 

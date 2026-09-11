@@ -7,9 +7,24 @@ import { AdminConnection, ResidentConnection } from '../models';
 const REGION = process.env.AWS_REGION ?? 'ap-southeast-1';
 const WS_ENDPOINT = process.env.WEBSOCKET_ENDPOINT ?? '';
 
-/** Builds a management-API client, or null when no endpoint is configured. */
+/** Loopback management endpoints only make sense for `serverless offline`. */
+const LOOPBACK_ENDPOINT = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i;
+
+/**
+ * `serverless-offline` sets `IS_OFFLINE=true` on every emulated Lambda (see
+ * node_modules/serverless-offline/src/lambda/LambdaFunction.js) and injects the
+ * provider environment, so a loopback endpoint is expected locally. A deployed
+ * Lambda has no `IS_OFFLINE`, and must never push to loopback: `backend/.env`
+ * sets http://localhost:3001 for offline, so a local `npm run deploy` would
+ * otherwise bake that value into the stage and turn working real-time push into
+ * silent failures (instead of the documented polling fallback).
+ */
+const IS_OFFLINE = process.env.IS_OFFLINE === 'true';
+
+/** Builds a management-API client, or null when no usable endpoint is configured. */
 function getClient(): ApiGatewayManagementApiClient | null {
   if (!WS_ENDPOINT) return null;
+  if (!IS_OFFLINE && LOOPBACK_ENDPOINT.test(WS_ENDPOINT)) return null;
   return new ApiGatewayManagementApiClient({
     region: REGION,
     endpoint: WS_ENDPOINT,
@@ -27,11 +42,15 @@ export async function broadcastToAdmin(
   adminId: string,
   payload: unknown
 ): Promise<void> {
+  // Resolve the client FIRST. Without a usable endpoint the push is a no-op, so
+  // the connection lookup below would be a wasted database round trip.
+  const client = getClient();
+  if (!client) return;
+
   const connections = await AdminConnection.find({ adminId })
     .select('connectionId')
     .lean();
-  const client = getClient();
-  if (!client || connections.length === 0) return;
+  if (connections.length === 0) return;
 
   const data = JSON.stringify(payload);
   const results = await Promise.allSettled(
@@ -72,11 +91,15 @@ export async function broadcastToResident(
   residentId: string,
   payload: unknown
 ): Promise<void> {
+  // Resolve the client FIRST. Without a usable endpoint the push is a no-op, so
+  // the connection lookup below would be a wasted database round trip.
+  const client = getClient();
+  if (!client) return;
+
   const connections = await ResidentConnection.find({ residentId })
     .select('connectionId')
     .lean();
-  const client = getClient();
-  if (!client || connections.length === 0) return;
+  if (connections.length === 0) return;
 
   const data = JSON.stringify(payload);
   const results = await Promise.allSettled(

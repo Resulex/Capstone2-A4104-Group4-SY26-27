@@ -1,6 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import {
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
@@ -10,9 +15,9 @@ import Checkbox from "@mui/material/Checkbox";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Typography from "@mui/material/Typography";
 import Snackbar from "@mui/material/Snackbar";
-import Link from "next/link";
 import Alert from "@mui/material/Alert";
 import { PageHeader } from "@/components/resident/PageHeader";
+import { useAuth } from "@/context/AuthContext";
 import { useResident } from "@/context/ResidentContext";
 import { acceptResidentTerms } from "@/lib/resident";
 import {
@@ -33,6 +38,78 @@ function formatConsentDate(iso?: string): string {
 }
 
 /**
+ * Scroll the requested section into view and move keyboard focus to its
+ * heading, so keyboard and screen-reader users land on the right text.
+ */
+function focusSection(id: string) {
+  const heading = document.getElementById(id);
+  if (!heading) return;
+  heading.scrollIntoView({ behavior: "smooth", block: "start" });
+  heading.focus({ preventScroll: true });
+}
+
+/**
+ * In-page "jump to section" control.
+ *
+ * Rendered as an inline `<span role="button">` rather than a real `<button>`:
+ * an inline-block button inflates the line box it sits in, which pushes the
+ * label text off-centre from the checkbox. An inline element flows with the
+ * sentence exactly like the plain text it replaces, so the checkbox and text
+ * stay aligned. Keyboard activation (Enter / Space) is wired up manually.
+ */
+function SectionJumpButton({
+  targetId,
+  children,
+}: {
+  targetId: string;
+  children: ReactNode;
+}) {
+  const jump = () => focusSection(targetId);
+
+  const handleClick = (event: MouseEvent<HTMLSpanElement>) => {
+    // Don't let the click reach the surrounding FormControlLabel and toggle it.
+    event.preventDefault();
+    event.stopPropagation();
+    jump();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLSpanElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    // Space would otherwise scroll the page.
+    event.preventDefault();
+    event.stopPropagation();
+    jump();
+  };
+
+  return (
+    <Typography
+      component="span"
+      role="button"
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      sx={{
+        // `font: inherit` keeps the type identical to the surrounding label
+        // text, so the line box (and therefore the baseline) is unchanged.
+        font: "inherit",
+        color: "primary.main",
+        fontWeight: 600,
+        cursor: "pointer",
+        textDecoration: "none",
+        "&:hover": { textDecoration: "underline" },
+        "&:focus-visible": {
+          outline: (theme) => `2px solid ${theme.palette.primary.main}`,
+          outlineOffset: 2,
+          borderRadius: 0.5,
+        },
+      }}
+    >
+      {children}
+    </Typography>
+  );
+}
+
+/**
  * Data Privacy & Terms of Service (`/legal`).
  *
  * New residents are routed here until they accept. Once agreed, it shows a
@@ -42,12 +119,14 @@ function formatConsentDate(iso?: string): string {
 export default function PrivacyTermsPage() {
   const router = useRouter();
   const { profile, setProfile } = useResident();
+  const { user, refreshSession } = useAuth();
   const [agreed, setAgreed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const hasConsented = Boolean(profile?.termsAcceptedAt);
+  // Server-verified consent; the cached profile is only used for display.
+  const hasConsented = Boolean(user?.termsAcceptedAt);
 
   const handleAccept = async () => {
     const id = profile?.residentId ?? profile?._id;
@@ -57,6 +136,18 @@ export default function PrivacyTermsPage() {
     try {
       const updated = await acceptResidentTerms(id);
       setProfile(updated);
+      // Re-read the session so the portal gate lifts without a reload.
+      const session = await refreshSession();
+      if (!session?.termsAcceptedAt) {
+        // The backend saved the consent but the portal could not confirm it.
+        // This almost always means the backend is not serving
+        // `GET /residents/me/consent` yet — restart `npm run offline` so the
+        // new route is registered. Fail loudly rather than silently returning
+        // the resident to this page.
+        throw new Error(
+          "Your consent was saved, but the portal could not confirm it. Reload the page, or restart the backend if this keeps happening.",
+        );
+      }
       setSaved(true);
       setTimeout(() => router.push("/"), 700);
     } catch (err) {
@@ -88,11 +179,22 @@ export default function PrivacyTermsPage() {
           {hasConsented && (
             <Alert severity="success" icon={false} sx={{ mb: 3 }}>
               You have agreed to the Terms of Service and Data Privacy Policy on{" "}
-              <strong>{formatConsentDate(profile?.termsAcceptedAt)}</strong>.
+              <strong>
+                {formatConsentDate(
+                  user?.termsAcceptedAt ?? profile?.termsAcceptedAt,
+                )}
+              </strong>
+              .
             </Alert>
           )}
 
-          <Typography variant="h6" component="h2" sx={{ fontWeight: 700, mt: 2, mb: 1 }}>
+          <Typography
+            id="terms-of-service"
+            variant="h6"
+            component="h2"
+            tabIndex={-1}
+            sx={{ fontWeight: 700, mt: 2, mb: 1, scrollMarginTop: 96 }}
+          >
             Terms of Service
           </Typography>
           {TERMS_SECTIONS.map((section) => (
@@ -105,8 +207,14 @@ export default function PrivacyTermsPage() {
               </Typography>
             </Box>
           ))}
-
-          <Typography variant="h6" component="h2" sx={{ fontWeight: 700, mt: 2, mb: 1 }}>
+          <hr />
+          <Typography
+            id="data-privacy-policy"
+            variant="h6"
+            component="h2"
+            tabIndex={-1}
+            sx={{ fontWeight: 700, mt: 2, mb: 1, scrollMarginTop: 96 }}
+          >
             Data Privacy Policy
           </Typography>
           {PRIVACY_SECTIONS.map((section) => (
@@ -134,6 +242,12 @@ export default function PrivacyTermsPage() {
           ) : (
             <>
               <FormControlLabel
+              sx={{
+    alignItems: "center",
+    "& .MuiFormControlLabel-label": {
+      lineHeight: 1.5,
+    },
+  }}
                 control={
                   <Checkbox
                     checked={agreed}
@@ -146,19 +260,17 @@ export default function PrivacyTermsPage() {
                   />
                 }
                 label={
-                  <Typography component="span" variant="body2">
+                  <Typography component="span" variant="body2" sx={{
+        lineHeight: 1.5,
+      }}>
                     I have read and agree to the{" "}
-                    <Link href="/legal">
-                      <Typography component="span" color="primary" sx={{ fontWeight: 600 }}>
-                        Terms of Service
-                      </Typography>
-                    </Link>{" "}
+                    <SectionJumpButton targetId="terms-of-service">
+                      Terms of Service
+                    </SectionJumpButton>{" "}
                     and{" "}
-                    <Link href="/legal">
-                      <Typography component="span" color="primary" sx={{ fontWeight: 600 }}>
-                        Data Privacy Policy
-                      </Typography>
-                    </Link>
+                    <SectionJumpButton targetId="data-privacy-policy">
+                      Data Privacy Policy
+                    </SectionJumpButton>
                     .
                   </Typography>
                 }

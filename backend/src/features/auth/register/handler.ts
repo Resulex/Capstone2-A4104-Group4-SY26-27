@@ -17,6 +17,10 @@ interface RegisterBody {
   barangayId?: string;
   houseUnitNumber?: string;
   streetPurokName?: string;
+  /** Must be true: the resident accepted the Terms + Data Privacy Policy. */
+  acceptTerms?: boolean;
+  /** Version of the Terms/Privacy Policy the resident accepted. */
+  termsVersion?: string;
 }
 
 /**
@@ -25,7 +29,11 @@ interface RegisterBody {
  *
  * POST /auth/register
  * Body: { firstName, lastName, middleName?, suffix?, email, contactNumber?,
- *         password, barangayId, houseUnitNumber?, streetPurokName? }
+ *         password, barangayId, houseUnitNumber?, streetPurokName?,
+ *         acceptTerms, termsVersion? }
+ *
+ * `acceptTerms` is required: consent captured on the signup legal screen is
+ * recorded on the Resident so they are not re-gated at `/legal` after login.
  */
 export async function register(
   event: APIGatewayProxyEvent,
@@ -44,12 +52,20 @@ export async function register(
     barangayId,
     houseUnitNumber,
     streetPurokName,
+    acceptTerms,
+    termsVersion,
   } = body;
 
   // Minimal validation.
   if (!firstName || !lastName || !email || !password || !barangayId) {
     return badRequest(
       'firstName, lastName, email, password, and barangayId are required.'
+    );
+  }
+
+  if (acceptTerms !== true) {
+    return badRequest(
+      'You must accept the Terms of Service and Data Privacy Policy to register.'
     );
   }
 
@@ -115,6 +131,10 @@ export async function register(
     passwordHash,
     accountStatus: 'active',
     isProvisioned: true,
+    // Consent captured on the signup legal screen. Recorded server-side so the
+    // resident is not redirected to `/legal` after their first login.
+    termsAcceptedAt: new Date(),
+    termsVersion: termsVersion || '1.0',
   });
 
   return created(user.toPublicJSON(), 'Account created.');

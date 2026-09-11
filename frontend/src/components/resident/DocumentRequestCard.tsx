@@ -4,9 +4,14 @@ import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import CardActionArea from "@mui/material/CardActionArea";
 import CardContent from "@mui/material/CardContent";
+import Chip from "@mui/material/Chip";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import Link from "next/link";
 import DescriptionIcon from "@mui/icons-material/Description";
+import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
+import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
 import { DocumentQueueRecord } from "@/lib/admin";
 import { formatDisplayDate } from "@/lib/resident";
 import { StatusChip } from "@/components/resident/StatusChip";
@@ -16,15 +21,35 @@ interface DocumentRequestCardProps {
   request: DocumentQueueRecord;
   /** Detail route, e.g. `/documents/{requestId}`. */
   href: string;
+  /** True while the barangay has updated this request and it is unseen. */
+  isUnread?: boolean;
+  /** Toggle the read state for this record (omitted on read-only surfaces). */
+  onToggleRead?: (referenceUrlId: string, isRead: boolean) => void;
 }
 
 /**
  * Reusable document-request card: document type, current status chip and the
  * expected completion date. Used on the dashboard and the requests list.
+ *
+ * `isUnread`/`onToggleRead` stay optional so the dashboard can render it with
+ * no notification state at all.
  */
-export function DocumentRequestCard({ request, href }: DocumentRequestCardProps) {
+export function DocumentRequestCard({
+  request,
+  href,
+  isUnread = false,
+  onToggleRead,
+}: DocumentRequestCardProps) {
   return (
-    <Card variant="outlined" sx={{ borderRadius: 3 }}>
+    <Card
+      variant="outlined"
+      sx={{
+        position: "relative",
+        borderRadius: 3,
+        // Unread records get the same tint the notification centre uses.
+        bgcolor: isUnread ? "primary.light" : undefined,
+      }}
+    >
       <CardActionArea
         component={Link}
         href={href}
@@ -50,13 +75,26 @@ export function DocumentRequestCard({ request, href }: DocumentRequestCardProps)
               <DescriptionIcon />
             </Box>
             <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-              <Typography
-                variant="subtitle1"
-                component="h3"
-                sx={{ fontWeight: 700, lineHeight: 1.3, mb: 0.25 }}
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: 0.75,
+                  mb: 0.25,
+                  // Keep the title clear of the corner read toggle.
+                  pr: onToggleRead ? 4 : 0,
+                }}
               >
-                {request.documentType}
-              </Typography>
+                <Typography
+                  variant="subtitle1"
+                  component="h3"
+                  sx={{ fontWeight: 700, lineHeight: 1.3 }}
+                >
+                  {request.documentType}
+                </Typography>
+                {isUnread && <Chip label="New" size="small" color="primary" />}
+              </Box>
               <Typography
                 variant="caption"
                 color="text.secondary"
@@ -90,6 +128,28 @@ export function DocumentRequestCard({ request, href }: DocumentRequestCardProps)
           </Box>
         </CardContent>
       </CardActionArea>
+      {onToggleRead && (
+        // A sibling of the link, never a child: a button inside the
+        // CardActionArea's anchor would be invalid and break keyboard use.
+        <Tooltip title={isUnread ? "Mark as read" : "Mark as unread"}>
+          <IconButton
+            size="small"
+            aria-label={
+              isUnread
+                ? `Mark ${request.requestId} as read`
+                : `Mark ${request.requestId} as unread`
+            }
+            onClick={() => onToggleRead(request.requestId, !isUnread)}
+            sx={{ position: "absolute", top: 8, right: 8, zIndex: 2 }}
+          >
+            {isUnread ? (
+              <MarkEmailReadIcon fontSize="small" />
+            ) : (
+              <MarkEmailUnreadIcon fontSize="small" />
+            )}
+          </IconButton>
+        </Tooltip>
+      )}
     </Card>
   );
 }

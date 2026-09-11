@@ -15,19 +15,26 @@ import { useDashboardData } from "@/context/DashboardDataContext";
 import { TelemetryCard } from "@/components/admin/TelemetryCard";
 import { RecentDocuments } from "@/components/admin/RecentDocuments";
 import { ActiveIncidentsTable } from "@/components/admin/ActiveIncidentsTable";
+import { useAdminProfile } from "@/hooks/useAdminProfile";
+import { canAccessAdminRoute } from "@/lib/rbac";
 
 /**
  * Admin Dashboard.
  *
- * Renders the three core telemetry panels (Pending Incidents, Pending
- * Documents, Active Users) plus the Active Incidents table and the Recent
- * Documents queue. Data is shared from the admin layout's dashboard-data
- * provider (fetched once from the backend list endpoints).
+ * Renders the telemetry cards (Pending Incidents, Pending Documents, Active
+ * Users) plus the Active Incidents table and the Recent Documents queue. Each
+ * element is shown only when the signed-in admin's `assignedRole` may open its
+ * destination route, and the column spans are recomputed from the number of
+ * visible cards so the row always fills. Data is shared from the admin
+ * layout's dashboard-data provider (fetched once from the backend list
+ * endpoints).
  */
 export default function AdminPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading, user } = useAuth();
+  const { profile, isLoading: isLoadingProfile } = useAdminProfile();
   const { dashboardData, isLoading: isLoadingData, error } = useDashboardData();
+  const adminRole = profile?.assignedRole;
 
   useEffect(() => {
     if (!isLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -39,7 +46,7 @@ export default function AdminPage() {
     return null;
   }
 
-  const cards = dashboardData
+  const allCards = dashboardData
     ? [
         {
           title: "Pending Incidents",
@@ -65,13 +72,39 @@ export default function AdminPage() {
       ]
     : [];
 
+  // Show only the elements whose destination the signed-in role may open —
+  // e.g. OPERATIONS_CLERK cannot reach /admin/residents, so the Active Users
+  // card is hidden rather than linking to a route that bounces back.
+  const cards = allCards.filter((card) =>
+    canAccessAdminRoute(adminRole, card.href),
+  );
+
+  // Fill the row: 3 cards → 3-up, 2 cards → 2-up, a lone card → full width.
+  const cardMd = cards.length >= 3 ? 4 : cards.length === 2 ? 6 : 12;
+  const cardSm = cards.length === 1 ? 12 : 6;
+
+  const showUserActivity = canAccessAdminRoute(adminRole, "/admin/residents");
+  const showDocuments = canAccessAdminRoute(
+    adminRole,
+    "/admin/document-requests",
+  );
+  const showIncidents = canAccessAdminRoute(adminRole, "/admin/incidents");
+  // Two panels share a row on large screens and stack at md; a lone panel
+  // spans the full width so no space is left empty beside it.
+  const panelBreakpoints =
+    showDocuments && showIncidents ? { md: 8, lg: 6 } : { md: 12, lg: 12 };
+
+  const subtitle = showUserActivity
+    ? "Live summary of incidents, document requests, and user activity."
+    : "Live summary of the queues you have access to.";
+
   return (
     <Box>
       <Typography variant="h5" component="h2" gutterBottom>
         Overview
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Live summary of incidents, document requests, and user activity.
+        {subtitle}
       </Typography>
 
       {error && (
@@ -80,7 +113,7 @@ export default function AdminPage() {
         </Alert>
       )}
 
-      {isLoadingData ? (
+      {isLoadingData || isLoadingProfile ? (
         <Box
           sx={{
             display: "flex",
@@ -94,7 +127,7 @@ export default function AdminPage() {
       ) : (
         <Grid container spacing={3}>
           {cards.map((card) => (
-            <Grid item key={card.title} xs={12} sm={6} md={4}>
+            <Grid item key={card.title} xs={12} sm={cardSm} md={cardMd}>
               <TelemetryCard
                 title={card.title}
                 value={card.value}
@@ -104,19 +137,23 @@ export default function AdminPage() {
               />
             </Grid>
           ))}
-          <Grid item xs={12} md={8} lg={6}>
-            <RecentDocuments
-              documents={dashboardData?.recentDocuments ?? []}
-              href="/admin/document-requests"
-            />
-          </Grid>
+          {showDocuments && (
+            <Grid item xs={12} {...panelBreakpoints}>
+              <RecentDocuments
+                documents={dashboardData?.recentDocuments ?? []}
+                href="/admin/document-requests"
+              />
+            </Grid>
+          )}
 
-          <Grid item xs={12} md={8} lg={6}>
-            <ActiveIncidentsTable
-              incidents={dashboardData?.activeIncidents ?? []}
-              href="/admin/incidents"
-            />
-          </Grid>
+          {showIncidents && (
+            <Grid item xs={12} {...panelBreakpoints}>
+              <ActiveIncidentsTable
+                incidents={dashboardData?.activeIncidents ?? []}
+                href="/admin/incidents"
+              />
+            </Grid>
+          )}
 
           
         </Grid>

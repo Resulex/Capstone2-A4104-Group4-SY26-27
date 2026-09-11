@@ -7,6 +7,7 @@ import { IncidentReport, Resident } from '../../../models';
 import {
   getAuthContext,
   assertOwnResidentRef,
+  actorIdentity,
 } from '../../../shared/authorization';
 import { ensureResidentForUser } from '../../../shared/residents';
 import { residentFullName, notifyAllActiveAdmins } from '../../../shared/notifications';
@@ -27,7 +28,7 @@ interface CreateIncidentBody {
   descriptionText?: string;
   locationDetails?: string;
   evidenceMediaUrls?: string[];
-  incidentStatus?: 'Pending' | 'Responding' | 'Resolved' | 'Closed';
+  incidentStatus?: 'Pending' | 'Responding' | 'Resolved' | 'Closed' | 'Duplicate';
 }
 
 /**
@@ -113,6 +114,14 @@ export async function createIncidentReport(
   // Defense-in-depth: residents can only file reports for themselves.
   assertOwnResidentRef(auth, effectiveResidentId);
 
+  // `Duplicate` needs the original report it repeats, which is only known when
+  // an admin performs a status transition — never at creation time.
+  if (body.incidentStatus === 'Duplicate') {
+    throw badRequestError(
+      'Duplicate status must be set by updating the report with the original incident.'
+    );
+  }
+
   await connectToDatabase();
 
   // A resident/official caller always has a Resident (auto-provisioned if
@@ -128,6 +137,12 @@ export async function createIncidentReport(
   }
 
   const incidentId = await nextIncidentId();
+  // Residents (and officials acting through the resident portal) always open a
+  // report as Pending; only an admin filing on someone's behalf may set it.
+  const incidentStatus =
+    auth.role === 'admin' ? body.incidentStatus || 'Pending' : 'Pending';
+  const changedBy = await actorIdentity(auth);
+  const reportedAt = new Date();
   const report = await IncidentReport.create({
     incidentId,
     residentId: resident._id,
@@ -137,8 +152,17 @@ export async function createIncidentReport(
     // System-driven triage: priority is computed by rules, not chosen by a human.
     triagePriority: computeTriagePriority(incidentCategory, descriptionText),
     evidenceMediaUrls: body.evidenceMediaUrls || [],
-    incidentStatus: body.incidentStatus || 'Pending',
-    reportedAt: new Date(),
+    incidentStatus,
+    // History starts at filing so residents always see an origin step.
+    timeline: [
+      {
+        step: incidentStatus,
+        date: reportedAt,
+        status: 'completed',
+        changedBy: changedBy ?? undefined,
+      },
+    ],
+    reportedAt,
   });
 
   // Notify all active admins of the new incident over the real-time channel.

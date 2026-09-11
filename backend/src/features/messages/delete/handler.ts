@@ -3,7 +3,7 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
-import { Message, ChatSession, Admin } from '../../../models';
+import { Message, ChatSession } from '../../../models';
 import { getAuthContext } from '../../../shared/authorization';
 
 /**

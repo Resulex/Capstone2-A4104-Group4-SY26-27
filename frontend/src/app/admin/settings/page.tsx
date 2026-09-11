@@ -15,11 +15,16 @@ import Grid from "@mui/material/Grid";
 import Divider from "@mui/material/Divider";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import InputAdornment from "@mui/material/InputAdornment";
+import IconButton from "@mui/material/IconButton";
 import SettingsIcon from "@mui/icons-material/Settings";
+import Visibility from "@mui/icons-material/Visibility";
+import VisibilityOff from "@mui/icons-material/VisibilityOff";
 import { useAuth } from "@/context/AuthContext";
 import { AdminProfile } from "@/hooks/useAdminProfile";
 import { fetchJson } from "@/lib/api";
-import { AdminRecord, updateAdmin } from "@/lib/admin";
+import { changeAdminPassword, updateAdmin } from "@/lib/admin";
+import { PASSWORD_POLICY_MESSAGE, passwordPolicyViolation } from "@/lib/password-policy";
 
 function accountStatusColor(status: string) {
   switch (status) {
@@ -33,7 +38,12 @@ function accountStatusColor(status: string) {
 }
 
 /**
- * Admin Settings page — edit the signed-in admin's name and password.
+ * Admin Settings page — edit the signed-in admin's own account.
+ *
+ * Names and the password are saved by two independent actions: names go
+ * through the admin-management route (`PATCH /admins/{id}`), while a password
+ * change goes through the self-service endpoint
+ * (`PATCH /auth/admin/password`), which requires the current password.
  * Email/username/role/status are shown read-only.
  */
 export default function SettingsPage() {
@@ -43,14 +53,21 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [snackMessage, setSnackMessage] = useState<string | null>(null);
   const [form, setForm] = useState({
     firstName: "",
     lastName: "",
     middleName: "",
-    password: "",
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
   });
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
     if (!isAuthLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -72,7 +89,9 @@ export default function SettingsPage() {
           firstName: data?.firstName ?? "",
           lastName: data?.lastName ?? "",
           middleName: data?.middleName ?? "",
-          password: "",
+          currentPassword: "",
+          newPassword: "",
+          confirmPassword: "",
         });
       } catch (err) {
         if (!cancelled) {
@@ -102,23 +121,77 @@ export default function SettingsPage() {
     }
     setSaving(true);
     setError(null);
-    setSuccess(false);
     try {
-      const body: Partial<AdminRecord> & { password?: string } = {
+      const updated = await updateAdmin(profile._id, {
         firstName: form.firstName,
         lastName: form.lastName,
         middleName: form.middleName,
-      };
-      if (form.password) body.password = form.password;
-
-      const updated = await updateAdmin(profile._id, body);
+      });
       setProfile(updated);
-      setForm((prev) => ({ ...prev, password: "" }));
-      setSuccess(true);
+      setSnackMessage("Profile updated.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save profile.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Client-side mirror of the backend's checks, so the Update Password button
+  // reflects the same rules without a round-trip. The backend re-validates.
+  const newPasswordViolation = form.newPassword
+    ? passwordPolicyViolation(form.newPassword)
+    : null;
+  const sameAsCurrent =
+    form.newPassword.length > 0 && form.newPassword === form.currentPassword;
+  const confirmMismatch =
+    form.confirmPassword.length > 0 &&
+    form.confirmPassword !== form.newPassword;
+  const canChangePassword =
+    form.currentPassword.length > 0 &&
+    form.newPassword.length > 0 &&
+    form.confirmPassword.length > 0 &&
+    newPasswordViolation === null &&
+    !sameAsCurrent &&
+    !confirmMismatch &&
+    !savingPassword;
+
+  const handlePasswordChange = async () => {
+    setPasswordError(null);
+    if (
+      !form.currentPassword ||
+      !form.newPassword ||
+      !form.confirmPassword
+    ) {
+      setPasswordError("Enter your current password and the new one twice.");
+      return;
+    }
+    if (newPasswordViolation) {
+      setPasswordError(newPasswordViolation);
+      return;
+    }
+    if (form.newPassword !== form.confirmPassword) {
+      setPasswordError("The two passwords do not match.");
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      await changeAdminPassword({
+        currentPassword: form.currentPassword,
+        newPassword: form.newPassword,
+      });
+      setForm((prev) => ({
+        ...prev,
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      }));
+      setSnackMessage("Password updated.");
+    } catch (err) {
+      setPasswordError(
+        err instanceof Error ? err.message : "Failed to update the password.",
+      );
+    } finally {
+      setSavingPassword(false);
     }
   };
 
@@ -187,17 +260,13 @@ export default function SettingsPage() {
                   fullWidth
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  label="New Password"
-                  type="password"
-                  value={form.password}
-                  onChange={setField("password")}
-                  helperText="Leave blank to keep your current password."
-                  fullWidth
-                />
-              </Grid>
             </Grid>
+
+            <Stack direction="row" spacing={2} sx={{ mt: 3 }}>
+              <Button variant="contained" onClick={handleSave} disabled={saving}>
+                {saving ? "Saving…" : "Save Changes"}
+              </Button>
+            </Stack>
 
             <Divider sx={{ my: 3 }} />
 
@@ -247,9 +316,128 @@ export default function SettingsPage() {
               </Grid>
             </Grid>
 
+            <Divider sx={{ my: 3 }} />
+
+            <Typography variant="h6" component="h3" sx={{ mb: 0.5 }}>
+              Change Password
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Confirm your current password, then choose a new one.
+            </Typography>
+
+            {passwordError && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {passwordError}
+              </Alert>
+            )}
+
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="Current Password"
+                  type={showCurrentPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={form.currentPassword}
+                  onChange={setField("currentPassword")}
+                  fullWidth
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton
+                          aria-label={
+                            showCurrentPassword
+                              ? "Hide current password"
+                              : "Show current password"
+                          }
+                          onClick={() => setShowCurrentPassword((v) => !v)}
+                          edge="end"
+                        >
+                          {showCurrentPassword ? <VisibilityOff /> : <Visibility />}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="New Password"
+                  type={showNewPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={form.newPassword}
+                  onChange={setField("newPassword")}
+                  error={sameAsCurrent || newPasswordViolation !== null}
+                  helperText={
+                    sameAsCurrent
+                      ? "The new password must be different from the current password."
+                      : PASSWORD_POLICY_MESSAGE
+                  }
+                  fullWidth
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton
+                          aria-label={
+                            showNewPassword
+                              ? "Hide new password"
+                              : "Show new password"
+                          }
+                          onClick={() => setShowNewPassword((v) => !v)}
+                          edge="end"
+                        >
+                          {showNewPassword ? <VisibilityOff /> : <Visibility />}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  label="Confirm Password"
+                  type={showConfirmPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={form.confirmPassword}
+                  onChange={setField("confirmPassword")}
+                  error={confirmMismatch}
+                  helperText={
+                    confirmMismatch
+                      ? "The two passwords do not match."
+                      : " "
+                  }
+                  fullWidth
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton
+                          aria-label={
+                            showConfirmPassword
+                              ? "Hide password confirmation"
+                              : "Show password confirmation"
+                          }
+                          onClick={() => setShowConfirmPassword((v) => !v)}
+                          edge="end"
+                        >
+                          {showConfirmPassword ? (
+                            <VisibilityOff />
+                          ) : (
+                            <Visibility />
+                          )}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Grid>
+            </Grid>
+
             <Stack direction="row" spacing={2} sx={{ mt: 3 }}>
-              <Button variant="contained" onClick={handleSave} disabled={saving}>
-                {saving ? "Saving…" : "Save Changes"}
+              <Button
+                variant="contained"
+                onClick={handlePasswordChange}
+                disabled={!canChangePassword}
+              >
+                {savingPassword ? "Updating…" : "Update Password"}
               </Button>
             </Stack>
           </CardContent>
@@ -257,10 +445,10 @@ export default function SettingsPage() {
       )}
 
       <Snackbar
-        open={success}
+        open={snackMessage !== null}
         autoHideDuration={4000}
-        onClose={() => setSuccess(false)}
-        message="Profile updated."
+        onClose={() => setSnackMessage(null)}
+        message={snackMessage ?? ""}
       />
     </Box>
   );

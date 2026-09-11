@@ -411,7 +411,7 @@ export interface SeedIncident {
   locationDetails: string;
   triagePriority: 'Critical' | 'High' | 'Medium' | 'Low';
   evidenceMediaUrls: string[];
-  incidentStatus: 'Pending' | 'Responding' | 'Resolved' | 'Closed';
+  incidentStatus: 'Pending' | 'Responding' | 'Resolved' | 'Closed' | 'Duplicate';
   reportedAt: string;
 }
 

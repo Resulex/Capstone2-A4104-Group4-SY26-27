@@ -28,6 +28,7 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
+import { useAuth } from "@/context/AuthContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { useAdminProfile } from "@/hooks/useAdminProfile";
 import {
@@ -35,7 +36,7 @@ import {
   fetchAdmins,
   createAdmin,
 } from "@/lib/admin";
-import { ADMIN_ROLES, ADMIN_ROLE_LABELS, AssignedAdminRole } from "@/lib/rbac";
+import { ADMIN_ROLES, ADMIN_ROLE_LABELS, AssignedAdminRole, getAdminLandingPath } from "@/lib/rbac";
 
 const STATUS_COLORS: Record<string, "success" | "warning" | "error" | "default"> = {
   active: "success",
@@ -44,37 +45,35 @@ const STATUS_COLORS: Record<string, "success" | "warning" | "error" | "default">
 };
 
 interface CreateFormState {
-  adminId: string;
   firstName: string;
   lastName: string;
   userName: string;
   emailAddress: string;
-  password: string;
   assignedRole: AssignedAdminRole;
 }
 
 const EMPTY_FORM: CreateFormState = {
-  adminId: "",
   firstName: "",
   lastName: "",
   userName: "",
   emailAddress: "",
-  password: "",
   assignedRole: "OPERATIONS_CLERK",
 };
 
 /**
- * User Management (`/admin/settings/users`) — SUPER_ADMIN only.
+ * User Management (`/admin/users`) — SUPER_ADMIN only.
  *
  * Lists all staff accounts and lets the super admin provision new ones. The
  * backend POST /admins creates the Mongo record AND auto-provisions the AWS
  * Cognito pool user (capturing the Cognito `sub`), rolling the Mongo record
- * back if Cognito fails.
+ * back if Cognito fails. The admin id is generated server-side and Cognito
+ * emails a temporary password, which the admin replaces on first sign-in.
  */
 export default function UserManagementPage() {
   const router = useRouter();
   const isOnline = useOnlineStatus();
-  const { profile } = useAdminProfile();
+  const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
+  const { profile, isLoading: isLoadingProfile } = useAdminProfile();
 
   const [admins, setAdmins] = useState<AdminRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -98,19 +97,24 @@ export default function UserManagementPage() {
   }, []);
 
   useEffect(() => {
-    // Guard: only a SUPER_ADMIN may reach this page.
-    if (profile && profile.assignedRole !== "SUPER_ADMIN") {
-      router.replace("/admin");
+    if (!isAuthLoading && (!isAuthenticated || user?.role !== "admin")) {
+      router.replace("/admin/login");
+    }
+  }, [isAuthLoading, isAuthenticated, user, router]);
+
+  useEffect(() => {
+    // Guard: only a SUPER_ADMIN may reach this page. The admin shell already
+    // blocks the route and hides the nav entry; this is defence in depth.
+    if (isLoadingProfile || !profile) return;
+    if (profile.assignedRole !== "SUPER_ADMIN") {
+      router.replace(getAdminLandingPath(profile.assignedRole));
       return;
     }
     void load();
-  }, [profile, router, load]);
+  }, [isLoadingProfile, profile, router, load]);
 
   const openCreate = () => {
-    setForm({
-      ...EMPTY_FORM,
-      adminId: `adm-${Date.now().toString().slice(-6)}`,
-    });
+    setForm({ ...EMPTY_FORM });
     setCreateOpen(true);
   };
 
@@ -121,12 +125,10 @@ export default function UserManagementPage() {
 
   const handleCreate = async () => {
     if (
-      !form.adminId ||
       !form.firstName ||
       !form.lastName ||
       !form.userName ||
-      !form.emailAddress ||
-      !form.password
+      !form.emailAddress
     ) {
       setNotice("All fields are required.");
       return;
@@ -134,18 +136,22 @@ export default function UserManagementPage() {
     setSaving(true);
     setError(null);
     try {
-      await createAdmin({
-        adminId: form.adminId.trim(),
+      const result = await createAdmin({
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
         userName: form.userName.trim(),
         emailAddress: form.emailAddress.trim(),
-        password: form.password,
         assignedRole: form.assignedRole,
         accountStatus: "active",
       });
       setCreateOpen(false);
-      setNotice(`Admin ${form.userName} created.`);
+      setNotice(
+        result.inviteDelivery === "cognito"
+          ? `Admin ${form.userName} created. The branded invitation could not be sent, so Cognito emailed its default invitation to ${form.emailAddress.trim()}.`
+          : result.inviteDelivery === "failed"
+            ? `Admin ${form.userName} created, but no invitation email could be sent. Fix SES delivery before they can sign in.`
+            : `Admin ${form.userName} created. An invitation with a temporary password was emailed to ${form.emailAddress.trim()}.`,
+      );
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create admin.");
@@ -154,7 +160,17 @@ export default function UserManagementPage() {
     }
   };
 
-  if (isLoading && admins.length === 0) {
+  // Session + profile must resolve, and the role must be SUPER_ADMIN, before any
+  // of this page's UI paints — otherwise a non-super-admin would briefly see the
+  // staff table and the Create Staff action.
+  if (
+    isAuthLoading ||
+    !isAuthenticated ||
+    user?.role !== "admin" ||
+    isLoadingProfile ||
+    profile?.assignedRole !== "SUPER_ADMIN" ||
+    (isLoading && admins.length === 0)
+  ) {
     return (
       <Box
         sx={{
@@ -164,7 +180,7 @@ export default function UserManagementPage() {
           minHeight: 240,
         }}
       >
-        <CircularProgress aria-label="Loading admins" />
+        <CircularProgress aria-label="Loading user management" />
       </Box>
     );
   }
@@ -257,14 +273,12 @@ export default function UserManagementPage() {
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Create Staff Account</DialogTitle>
         <DialogContent>
+          <Alert severity="info" sx={{ mb: 1 }}>
+            The admin ID is generated automatically. A temporary password will be
+            emailed to the address below, and the admin sets their own password on
+            first sign-in.
+          </Alert>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField
-              label="Admin ID"
-              value={form.adminId}
-              onChange={(e) => setField("adminId", e.target.value)}
-              fullWidth
-              helperText="Unique id for this account (e.g. adm-001)."
-            />
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
               <TextField
                 label="First Name"
@@ -293,14 +307,6 @@ export default function UserManagementPage() {
               onChange={(e) => setField("emailAddress", e.target.value)}
               fullWidth
               helperText="Used as the Cognito sign-in name."
-            />
-            <TextField
-              label="Temporary Password"
-              type="password"
-              value={form.password}
-              onChange={(e) => setField("password", e.target.value)}
-              fullWidth
-              helperText="The admin uses this password to sign in before enrolling MFA."
             />
             <Box>
               <InputLabel id="role-select-label">Assigned Role</InputLabel>

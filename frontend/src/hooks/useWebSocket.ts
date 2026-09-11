@@ -28,9 +28,13 @@ export interface UseWebSocketOptions {
   onMessage?: (data: unknown) => void;
 }
 
-/** URL of the backend WebSocket server (fallback to the default local dev). */
+/**
+ * URL of the backend WebSocket server. Defaults to the local
+ * `serverless-offline` port; keep in step with
+ * `custom.serverless-offline.websocketPort` in backend/serverless.yml.
+ */
 const WEBSOCKET_URL =
-  process.env.NEXT_PUBLIC_WEBSOCKET_URL ?? "ws://localhost:3002";
+  process.env.NEXT_PUBLIC_WEBSOCKET_URL ?? "ws://localhost:3001";
 
 /** Delay (ms) before reconnecting after an unexpected close or error. */
 const RECONNECT_DELAY_MS = 3000;
@@ -40,9 +44,10 @@ const RECONNECT_DELAY_MS = 3000;
  *
  * Establishes a single connection, tracks its lifecycle, transparently
  * reconnects on unexpected close/error, and invokes `onMessage` for every
- * inbound JSON message. Cleans up on unmount. Because no WebSocket server
- * exists yet, the connection will naturally settle into the `disconnected`
- * state, which the UI surfaces as a warning.
+ * inbound JSON message. Cleans up on unmount. The connection needs a
+ * `serverless.yml` `websocket` event and a running `$connect` route; without
+ * them (or with a wrong port) the handshake fails and the socket cycles
+ * through `error`/`disconnected` with a 3s retry.
  */
 export function useWebSocket({
   token,

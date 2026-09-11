@@ -15,10 +15,14 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import { AccessibilityControls } from "@/components/AccessibilityControls";
 import { useResident } from "@/context/ResidentContext";
 import { getResidentInitials } from "@/lib/resident";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getShellColors } from "@/theme/theme";
 import {
   RESIDENT_SIDEBAR_WIDTH,
   RESIDENT_SIDEBAR_WIDTH_COLLAPSED,
 } from "@/components/resident/ResidentSidebar";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getShellColors } from "@/theme/theme";
 
 interface ResidentHeaderProps {
   /** Whether the desktop drawer is expanded. */
@@ -49,6 +53,8 @@ export function ResidentHeader({
   title,
 }: ResidentHeaderProps) {
   const { profile } = useResident();
+  const { highContrast } = useAccessibilityTheme();
+  const shell = getShellColors(highContrast);
   // The header is `position: fixed`, so it must track the drawer's actual
   // width: 280px when expanded, 72px (icons only) when collapsed.
   const drawerWidth = expanded
@@ -70,7 +76,7 @@ export function ResidentHeader({
           }),
         borderBottom: 1,
         borderColor: "divider",
-        bgcolor: "background.paper",
+        bgcolor: shell.header,
         zIndex: (theme) => theme.zIndex.drawer + 1,
       }}
     >
@@ -97,7 +103,11 @@ export function ResidentHeader({
         <Typography
           variant="h6"
           component="h1"
-          sx={{ flexGrow: 1, display: { xs: "none", sm: "block" } }}
+          sx={{
+            flexGrow: 1,
+            display: { xs: "none", sm: "block" },
+            color: shell.headerText,
+          }}
         >
           {title}
         </Typography>

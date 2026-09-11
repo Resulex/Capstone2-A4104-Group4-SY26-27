@@ -32,7 +32,8 @@ export async function listResidents(
 
   const residents = await Resident.find(query).lean();
   const publicList = residents.map((r) => {
-    const { passwordHash, ...rest } = r as unknown as Record<string, unknown>;
+    // Destructured purely to omit the hash; the binding is intentionally unused.
+    const { passwordHash: _passwordHash, ...rest } = r as unknown as Record<string, unknown>;
     return rest;
   });
 

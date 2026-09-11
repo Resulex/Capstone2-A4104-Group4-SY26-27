@@ -80,7 +80,8 @@ export async function sendResidentNotification(
 
 /** Send the same notification to every active admin as independent records. */
 export async function notifyAllActiveAdmins(
-  input: Omit<NotificationInput, 'recipientId'>
+  input: Omit<NotificationInput, 'recipientId'>,
+  options: { excludeAdminId?: string } = {}
 ): Promise<void> {
   await connectToDatabase();
   const admins = await Admin.find({ accountStatus: 'active' })
@@ -88,6 +89,15 @@ export async function notifyAllActiveAdmins(
     .lean();
   // Sequential to avoid race conditions on sequential notification ids.
   for (const admin of admins) {
+    // `excludeAdminId` is an Admin `_id`. It keeps the person who made a status
+    // change out of their own feed — otherwise resolving a record would
+    // immediately flag it as unread for the admin who just resolved it.
+    if (
+      options.excludeAdminId &&
+      String(admin._id) === options.excludeAdminId
+    ) {
+      continue;
+    }
     await sendAdminNotification({ ...input, recipientId: String(admin._id) });
   }
 }

@@ -1,4 +1,4 @@
-import { deleteApi, getApi, patchApi, postApi } from "@/lib/api";
+import { deleteApi, fetchJson, getApi, patchApi, postApi } from "@/lib/api";
 
 /**
  * Data types + fetch helpers for the admin residents and document-request
@@ -26,6 +26,25 @@ export interface ResidentRecord {
   createdAt: string;
 }
 
+/** The admin/official who made a status change (captured at change time). */
+export interface TimelineActor {
+  userId: string;
+  fullName: string;
+}
+
+/** One entry of a record's status-change history (oldest first). */
+export interface TimelineEntry {
+  step?: string;
+  date?: string;
+  status?: string;
+  /** Admin note recorded with this transition. */
+  remarks?: string;
+  /** Who made the change — shown to admins only. */
+  changedBy?: TimelineActor;
+  /** Original report (`INC-...`) when the entry marks a duplicate. */
+  duplicateOfIncidentId?: string;
+}
+
 /** A document request record for the queue page. */
 export interface DocumentQueueRecord {
   requestId: string;
@@ -41,6 +60,8 @@ export interface DocumentQueueRecord {
   dateRequested: string;
   verificationIdUrl?: string;
   remarks?: string;
+  /** Processing history (oldest first) with remarks per status. */
+  timeline?: TimelineEntry[];
 }
 
 /** An incident report record (fields exposed by the list endpoint). */
@@ -54,6 +75,12 @@ export interface IncidentRecord {
   triagePriority: string;
   evidenceMediaUrls?: string[];
   incidentStatus: string;
+  /** Latest status-change remark. */
+  remarks?: string;
+  /** Status-change history (oldest first) with remarks per status. */
+  timeline?: TimelineEntry[];
+  /** Original report this one duplicates (`INC-...`) while status is Duplicate. */
+  duplicateOfIncidentId?: string;
   reportedAt: string;
   createdAt?: string;
   updatedAt?: string;
@@ -134,6 +161,13 @@ export interface ChatMessageRecord {
   sentTimestamp?: string;
   createdAt?: string;
   updatedAt?: string;
+  /**
+   * Client-side only: an optimistic echo the server has not confirmed yet.
+   * Never sent to the backend and never present on a server response.
+   */
+  pending?: boolean;
+  /** Client-side only: an optimistic echo whose send failed. */
+  failed?: boolean;
 }
 
 /** An admin account record (used for recipient resolution and settings). */
@@ -243,7 +277,12 @@ export async function fetchOfficial(
 /** Update an incident report's status/priority via PATCH. */
 export async function updateIncidentReport(
   id: string,
-  body: { triagePriority?: string; incidentStatus?: string },
+  body: {
+    triagePriority?: string;
+    incidentStatus?: string;
+    remarks?: string;
+    duplicateOfIncidentId?: string;
+  },
 ): Promise<IncidentRecord> {
   return patchApi<IncidentRecord>(
     `incident-reports/${encodeURIComponent(id)}`,
@@ -304,6 +343,71 @@ export async function markAllNotificationsRead(): Promise<number> {
   return data?.updated ?? 0;
 }
 
+/**
+ * Set the read state of every notification pointing at the given records
+ * (`INC-…` / `REQ-…` / `chat-…`). Lets a record be marked seen — or unread
+ * again — in one round trip instead of one PATCH per notification. The backend
+ * scopes the update to the caller's own notifications, so the same call is
+ * correct for an admin and for a resident.
+ */
+export async function markNotificationsByReference(
+  referenceUrlIds: string[],
+  isRead = true,
+): Promise<number> {
+  const data = await patchApi<{ updated?: number }>(
+    "notifications/read-by-reference",
+    { referenceUrlIds, isRead },
+  );
+  return data?.updated ?? 0;
+}
+
+/**
+ * Distinct `referenceUrlId`s of the unread notifications in one category.
+ *
+ * Both portals model "unread" the same way — a *record* is unread while the
+ * caller still has unread notifications pointing at it — and a record can carry
+ * several (created, then one per status change), so badges and rows must count
+ * references, not notification rows.
+ */
+export function collectUnreadReferences(
+  notifications: NotificationRecord[],
+  category: string,
+): Set<string> {
+  const references = new Set<string>();
+  for (const n of notifications) {
+    if (!n.isRead && n.notificationCategory === category && n.referenceUrlId) {
+      references.add(n.referenceUrlId);
+    }
+  }
+  return references;
+}
+
+/** Apply a read state to every notification behind a set of references. */
+export function applyReadState(
+  notifications: NotificationRecord[],
+  referenceUrlIds: string[],
+  isRead: boolean,
+): NotificationRecord[] {
+  const targets = new Set(referenceUrlIds);
+  return notifications.map((n) =>
+    n.referenceUrlId && targets.has(n.referenceUrlId) ? { ...n, isRead } : n,
+  );
+}
+
+/**
+ * True when any of the given keys has an unread notification.
+ *
+ * A record may be referenced by more than one key over time — chat sessions in
+ * particular, where notifications written before the switch to the session id
+ * carry the incident's Mongo `_id` instead.
+ */
+export function hasUnreadReference(
+  unreadReferences: Set<string>,
+  keys: (string | undefined)[],
+): boolean {
+  return keys.some((key) => (key ? unreadReferences.has(key) : false));
+}
+
 /** Play a short notification chime via the Web Audio API (no asset file). */
 export function playNotificationSound(): void {
   if (typeof window === "undefined") return;
@@ -339,6 +443,30 @@ export async function fetchAdminWsToken(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Request an admin password-reset email (sent by the backend via Amazon SES).
+ * `/api/auth/admin/*` is proxied by a `next.config.ts` rewrite to the backend,
+ * so — like `fetchAdminWsToken` — these deliberately bypass the `/api/backend`
+ * helpers, which only wrap business endpoints.
+ */
+export async function requestAdminPasswordReset(email: string): Promise<void> {
+  await fetchJson("/api/auth/admin/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+/** Complete an admin password reset with the token from the emailed link. */
+export async function confirmAdminPasswordReset(body: {
+  token: string;
+  newPassword: string;
+}): Promise<void> {
+  await fetchJson("/api/auth/admin/forgot-password/confirm", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 /** Mark a notification read/unread via PATCH. */
@@ -428,20 +556,43 @@ export async function updateAdmin(
   return patchApi<AdminRecord>(`admins/${encodeURIComponent(id)}`, body);
 }
 
-/** Create a new admin account via POST /admins (top-tier 'Admin' role only). */
+/**
+ * Change the signed-in admin's OWN password via PATCH /auth/admin/password.
+ * The endpoint is self-scoped to the session JWT, so no admin id is passed.
+ * The backend verifies `currentPassword` against Cognito before applying
+ * `newPassword` — unlike `updateAdmin`, which is the admin-management route a
+ * SUPER_ADMIN uses to reset someone else (and so has no old password).
+ */
+export async function changeAdminPassword(body: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<{ message?: string }> {
+  return patchApi<{ message?: string }>("auth/admin/password", body);
+}
+
+/**
+ * Create a new admin account via POST /admins (top-tier 'Admin' role only).
+ * The backend generates the admin id and emails a temporary password, so
+ * neither `adminId` nor `password` is accepted here.
+ *
+ * `inviteDelivery` reports where the invitation came from — 'ses' (our branded
+ * email), 'cognito' (fallback) or 'failed'. A delivery problem never fails the
+ * request, so the UI must surface it.
+ */
 export async function createAdmin(body: {
-  adminId: string;
   firstName: string;
   lastName: string;
   middleName?: string;
   userName: string;
   emailAddress: string;
-  password: string;
   phoneNumber?: string;
   assignedRole?: "SUPER_ADMIN" | "OPERATIONS_CLERK" | "INFO_OFFICER";
   accountStatus?: "active" | "suspended" | "deactivated";
-}): Promise<AdminRecord> {
-  return postApi<AdminRecord>("admins", body);
+}): Promise<AdminRecord & { inviteDelivery?: "ses" | "cognito" | "failed" }> {
+  return postApi<AdminRecord & { inviteDelivery?: "ses" | "cognito" | "failed" }>(
+    "admins",
+    body,
+  );
 }
 
 /** Create an announcement via POST. */

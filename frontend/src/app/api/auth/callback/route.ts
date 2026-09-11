@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server";
+import {
+  SESSION_COOKIE,
+  sessionCookieOptions,
+  sessionMaxAgeSeconds,
+} from "@/lib/session-cookie";
 
 /**
  * POST /api/auth/callback
@@ -7,6 +12,9 @@ import { NextResponse } from "next/server";
  * httpOnly cookie. Storing it in an httpOnly cookie keeps the token out of
  * client-side JS (localStorage) and automatically attaches it to subsequent
  * requests to the backend-proxied routes.
+ *
+ * The cookie attributes live in `@/lib/session-cookie` so this route and the
+ * logout route can never drift apart.
  */
 export async function POST(request: Request) {
   let body: { token?: unknown };
@@ -28,13 +36,11 @@ export async function POST(request: Request) {
   }
 
   const response = NextResponse.json({ ok: true });
-  response.cookies.set("kbc_token", token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
-  });
+  response.cookies.set(
+    SESSION_COOKIE,
+    token,
+    sessionCookieOptions(sessionMaxAgeSeconds()),
+  );
 
   return response;
 }

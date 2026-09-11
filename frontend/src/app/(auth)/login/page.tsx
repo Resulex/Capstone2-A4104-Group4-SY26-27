@@ -5,9 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
 import Divider from "@mui/material/Divider";
-import FormControlLabel from "@mui/material/FormControlLabel";
 import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
 import Paper from "@mui/material/Paper";
@@ -19,44 +17,78 @@ import Snackbar from "@mui/material/Snackbar";
 import Image from "next/image";
 import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
-import GoogleIcon from "@mui/icons-material/Google";
-import { useAuth } from "@/context/AuthContext";
+import { GoogleLogo } from "@/components/shared/GoogleLogo";
+import { useAuth, type AuthUser } from "@/context/AuthContext";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
 import { useResident } from "@/context/ResidentContext";
 import { ResidentProfile } from "@/lib/resident";
 import { ApiError, fetchJson, getJwt, postApi } from "@/lib/api";
+import { getAuthCardSurface } from "@/theme/theme";
+
+/**
+ * Map the backend's `user.role` onto a shell role.
+ *
+ * `official` is passed through so it is no longer mistaken for a resident;
+ * anything unexpected falls back to "resident", which is the portal this page
+ * belongs to.
+ */
+function toLoginRole(value: unknown): AuthUser["role"] {
+  return value === "admin" || value === "official" ? value : "resident";
+}
 
 export default function ResidentLoginPage() {
   const router = useRouter();
   const { setToken } = useAuth();
+  const { highContrast } = useAccessibilityTheme();
   const { setProfile } = useResident();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const popupRef = useRef<Window | null>(null);
+  // Watcher that reports a popup closed without a result. It is cleared the
+  // moment the popup delivers a token, so it can never fire a second (error)
+  // toast alongside the success toast.
+  const popupWatchRef = useRef<number | null>(null);
+  const popupCompletedRef = useRef(false);
+  /**
+   * Signed OAuth `state` minted by the backend when the Google popup is opened.
+   * The callback echoes it back and we reject any payload whose state does not
+   * match, which binds the result to the attempt THIS page started.
+   */
+  const googleStateRef = useRef<string | null>(null);
 
-  // If the user just created an account via /signup, welcome them back with a
-  // success message (query param `/login?registered=1`).
+  const stopWatchingPopup = useCallback(() => {
+    if (popupWatchRef.current !== null) {
+      window.clearInterval(popupWatchRef.current);
+      popupWatchRef.current = null;
+    }
+  }, []);
+
+  // Stop the watcher if the user navigates away while the popup is open.
+  useEffect(() => stopWatchingPopup, [stopWatchingPopup]);
+
+  // Two query flags can land here:
+  // - `registered=1`: the user just created an account via /signup.
+  // - `role=unsupported`: the shell guard sent an authenticated user whose role
+  //   has no portal (e.g. `official`) back here — explain why.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("registered") === "1") {
       setSuccess("Account created successfully! You can now log in.");
+    }
+    if (params.get("role") === "unsupported") {
+      setError(
+        "Your account role does not have a portal yet. Please contact the barangay office.",
+      );
     }
   }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
-
-    if (!consent) {
-      setError(
-        "You must agree to the Terms of Service and Data Privacy Policy before logging in.",
-      );
-      return;
-    }
 
     if (!identifier.trim() || !password) {
       setError("Please enter your email address or mobile number and password.");
@@ -84,13 +116,31 @@ export default function ResidentLoginPage() {
         );
       }
 
-      const role = data.user?.role === "admin" ? "admin" : "resident";
+      const role = toLoginRole(data.user?.role);
       await setToken(token, role);
-      // Prefer the linked resident profile; fall back to the user payload.
+      // Never inherit a previously stored resident profile: when the payload
+      // carries no resident we still overwrite (falling back to the user
+      // payload, which has no `termsAcceptedAt`) so a deleted or re-created
+      // account cannot keep the old consent and skip the legal gate.
       if (data.resident) setProfile(data.resident);
       else if (data.user) setProfile(data.user as unknown as ResidentProfile);
+      else setProfile(null);
+
+      // Residents must accept the Terms + Data Privacy Policy before using the
+      // portal: send unconsented accounts straight to the legal page instead of
+      // bouncing through `/`. The resident layout enforces this as a backstop.
+      const needsConsent = !data.resident?.termsAcceptedAt;
+
+      // `official` accounts authenticate but have no portal to land in.
+      if (role === "official") {
+        setError(
+          "Your account role does not have a portal yet. Please contact the barangay office.",
+        );
+        return;
+      }
+
       setSuccess("Signed in successfully. Redirecting…");
-      router.push(role === "admin" ? "/admin" : "/");
+      router.push(role === "admin" ? "/admin" : needsConsent ? "/legal" : "/");
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -117,18 +167,52 @@ export default function ResidentLoginPage() {
       const data = event.data as {
         token?: string;
         user?: ResidentProfile;
+        /** Signed OAuth state, echoed back by the backend callback. */
+        state?: string;
         isNewUser?: boolean;
+        isNewResident?: boolean;
+        /** Backend-computed: has this resident already recorded consent? */
+        termsAccepted?: boolean;
       };
       if (!data || typeof data.token !== "string") return;
 
+      // The popup posts its result and immediately closes itself — stop the
+      // watcher before it can report a spurious "cancelled" error toast.
+      popupCompletedRef.current = true;
+      stopWatchingPopup();
+      popupRef.current = null;
+
+      // Bind the result to the attempt this page started. Without this check the
+      // popup could be navigated to a callback carrying someone else's account,
+      // and the token would be accepted verbatim.
+      const expectedState = googleStateRef.current;
+      googleStateRef.current = null;
+      if (!expectedState || data.state !== expectedState) {
+        setSubmitting(false);
+        setError("Google sign-in could not be verified. Please try again.");
+        return;
+      }
+
       setSubmitting(true);
+      setError(null);
       try {
         await setToken(data.token, "resident");
         // Persist the resident profile returned by the SSO callback so the
-        // resident shell (sidebar avatar, header) can display it across reloads.
-        if (data.user) setProfile(data.user);
+        // resident shell (sidebar avatar, header) can display it across
+        // reloads. Passing null clears any stale stored profile.
+        const profile = data.user ?? null;
+        setProfile(profile);
+
+        // A brand-new SSO resident has no `termsAcceptedAt`, so they must be
+        // taken to the legal page to agree before the portal unlocks. Prefer
+        // the backend's flag, fall back to the returned profile field.
+        const needsConsent =
+          typeof data.termsAccepted === "boolean"
+            ? !data.termsAccepted
+            : !profile?.termsAcceptedAt;
+
         setSuccess("Signed in successfully. Redirecting…");
-        router.push("/");
+        router.push(needsConsent ? "/legal" : "/");
       } catch (err) {
         setError(
           err instanceof ApiError
@@ -139,7 +223,7 @@ export default function ResidentLoginPage() {
         setSubmitting(false);
       }
     },
-    [router, setToken, setProfile],
+    [router, setToken, setProfile, stopWatchingPopup],
   );
 
   useEffect(() => {
@@ -151,28 +235,36 @@ export default function ResidentLoginPage() {
     setError(null);
     setSuccess(null);
     setSubmitting(true);
+    // Drop any watcher left over from a previous attempt.
+    stopWatchingPopup();
+    popupCompletedRef.current = false;
+    googleStateRef.current = null;
     try {
       const { data } = await fetchJson<{
-        data: { authUrl: string };
+        data: { authUrl: string; state: string };
       }>("/api/auth/resident/google");
+      // Remember the signed state so the callback result can be matched to this
+      // attempt (see `handleGoogleMessage`).
+      googleStateRef.current = data.state;
       const popup = window.open(data.authUrl, "google-oauth", "width=520,height=640");
       if (!popup) {
         setError(
           "Your browser blocked the Google sign-in popup. Please allow pop-ups and try again.",
         );
+        setSubmitting(false);
         return;
       }
       popupRef.current = popup;
 
-      // If the popup closes without ever delivering a token (e.g. the user
-      // cancelled), surface a failure toast on the login page.
-      const timer = window.setInterval(() => {
-        if (popup.closed) {
-          window.clearInterval(timer);
-          popupRef.current = null;
-          setError("Google sign-in was cancelled. Please try again.");
-          setSubmitting(false);
-        }
+      // If the popup closes without EVER delivering a token (e.g. the user
+      // cancelled), surface a failure toast. `popupRef` is intentionally left
+      // intact so a message that lands just after the close is still accepted.
+      popupWatchRef.current = window.setInterval(() => {
+        if (!popup.closed) return;
+        stopWatchingPopup();
+        if (popupCompletedRef.current) return;
+        setError("Google sign-in was cancelled. Please try again.");
+        setSubmitting(false);
       }, 500);
     } catch (err) {
       setError(
@@ -180,8 +272,6 @@ export default function ResidentLoginPage() {
           ? err.message
           : "Could not start Google sign-in. Please try again.",
       );
-      setSubmitting(false);
-    } finally {
       setSubmitting(false);
     }
   };
@@ -192,6 +282,7 @@ export default function ResidentLoginPage() {
       sx={{
         p: { xs: 3, sm: 4 },
         borderRadius: 3,
+        bgcolor: getAuthCardSurface(highContrast),
       }}
     >
       <Stack spacing={3}>
@@ -240,14 +331,14 @@ export default function ResidentLoginPage() {
         <Box component="form" onSubmit={handleSubmit} noValidate>
           <Stack spacing={2}>
             <TextField
-              label="Email Address or Mobile Number"
+              label="Email Address"
               type="text"
               autoComplete="username"
               fullWidth
               required
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
-              inputProps={{ "aria-label": "Email address or mobile number" }}
+              inputProps={{ "aria-label": "Email address" }}
             />
             <TextField
               label="Password"
@@ -275,61 +366,6 @@ export default function ResidentLoginPage() {
               }}
             />
 
-            <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-              <Link
-                href="/forgot-password"
-                aria-label="Forgot password"
-              >
-                <Typography
-                  component="span"
-                  variant="body2"
-                  color="primary"
-                  sx={{ fontWeight: 600 }}
-                >
-                  Forgot password?
-                </Typography>
-              </Link>
-            </Box>
-
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={consent}
-                  onChange={(e) => setConsent(e.target.checked)}
-                  color="primary"
-                  inputProps={{
-                    "aria-label":
-                      "I have read and agree to the Terms of Service and Data Privacy Policy",
-                  }}
-                />
-              }
-              label={
-                <Typography component="span" variant="body2">
-                  I have read and agree to the{" "}
-                  <Link href="/terms">
-                    <Typography
-                      component="span"
-                      color="primary"
-                      sx={{ fontWeight: 600 }}
-                    >
-                      Terms of Service
-                    </Typography>
-                  </Link>{" "}
-                  and{" "}
-                  <Link href="/privacy">
-                    <Typography
-                      component="span"
-                      color="primary"
-                      sx={{ fontWeight: 600 }}
-                    >
-                      Data Privacy Policy
-                    </Typography>
-                  </Link>{" "}
-                  under RA 10173.
-                </Typography>
-              }
-            />
-
             <Button
               type="submit"
               variant="contained"
@@ -350,7 +386,7 @@ export default function ResidentLoginPage() {
           color="inherit"
           size="large"
           fullWidth
-          startIcon={<GoogleIcon />}
+          startIcon={<GoogleLogo />}
           onClick={handleGoogleSignIn}
           disabled={submitting}
         >

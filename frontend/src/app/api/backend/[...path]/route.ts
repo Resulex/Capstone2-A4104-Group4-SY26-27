@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { SESSION_COOKIE, clearSessionCookie } from "@/lib/session-cookie";
+import { verifySessionToken } from "@/lib/session-guard";
 
 /**
  * Generic proxy for backend business endpoints.
@@ -22,7 +24,7 @@ interface RouteContext {
 /** Shared forwarder: proxies a backend request, forwarding the JWT + JSON body. */
 async function forward(request: NextRequest, context: RouteContext, method: string) {
   const { path } = await context.params;
-  const token = request.cookies.get("kbc_token")?.value;
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
 
   const backendPath = path.map(encodeURIComponent).join("/");
   const query = request.nextUrl.searchParams.toString();
@@ -68,10 +70,28 @@ async function forward(request: NextRequest, context: RouteContext, method: stri
   // Mark responses no-store so neither the browser cache nor the CDN (CloudFront
   // on Amplify, which uses a default TTL when no Cache-Control is present) can
   // serve a stale user-scoped payload.
-  return NextResponse.json(
+  const response = NextResponse.json(
     body ?? { success: false, message: "Empty response from backend." },
     { status: upstream.status, headers: { "Cache-Control": "no-store" } },
   );
+
+  // Dispose of a token the backend has rejected, so it is not resent on every
+  // subsequent request until its max-age runs out.
+  //
+  // 401 is unambiguous, but 403 is NOT: the authorizer denies invalid/expired
+  // tokens with a 403 (Deny policy), while handler-level RBAC also returns 403
+  // for a perfectly valid session that merely lacks the required rights.
+  // Clearing on every 403 would log a user out for touching an endpoint they
+  // are not permitted to use, so only clear once `GET /auth/session`
+  // independently confirms the token is dead.
+  if (token && (upstream.status === 401 || upstream.status === 403)) {
+    const session = await verifySessionToken(token);
+    if (!session.valid && !session.unreachable) {
+      return clearSessionCookie(response);
+    }
+  }
+
+  return response;
 }
 
 export async function GET(request: NextRequest, context: RouteContext) {

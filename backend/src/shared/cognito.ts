@@ -28,6 +28,7 @@ import {
   unauthorizedError,
 } from './errors';
 import { verifyTotp } from './totp';
+import { PASSWORD_POLICY_MESSAGE } from './password-policy';
 
 /**
  * AWS Cognito helpers for admin authentication (software-token TOTP MFA).
@@ -54,13 +55,14 @@ import { verifyTotp } from './totp';
 // Public types
 // ---------------------------------------------------------------------------
 
-/** Cognito challenge names relevant to admin MFA (software token = TOTP). */
-export type AuthChallengeName = 'SOFTWARE_TOKEN_MFA' | 'MFA_SETUP';
+/** Cognito challenge names relevant to admin auth (software token = TOTP). */
+export type AuthChallengeName = 'SOFTWARE_TOKEN_MFA' | 'MFA_SETUP' | 'NEW_PASSWORD_REQUIRED';
 
 /** Result of {@link CognitoGateway.initiateAuth}. */
 export type AuthStartResult =
   | { challenge: 'SOFTWARE_TOKEN_MFA'; session: string }
-  | { challenge: 'MFA_SETUP'; session: string };
+  | { challenge: 'MFA_SETUP'; session: string }
+  | { challenge: 'NEW_PASSWORD_REQUIRED'; session: string };
 
 /** Result of {@link CognitoGateway.respondToTotpChallenge}. */
 export interface AuthCompleteResult {
@@ -82,14 +84,43 @@ export interface TotpSetupResult {
 export interface ProvisionParams {
   /** Cognito username = the admin's emailAddress. */
   username: string;
-  /** Permanent password to set (bypasses NEW_PASSWORD_REQUIRED). */
+  /**
+   * Initial temporary password for a *new* pool user. Cognito forces a change
+   * on first sign-in, and emails it via the pool invitation message unless
+   * {@link suppressInviteEmail} is set. When the pool user already exists it is
+   * applied as a permanent password instead.
+   */
   password: string;
+  /**
+   * Skip Cognito's own invitation email for a new user. Set by callers that
+   * send their own message (e.g. `POST /admins` emails the temporary password
+   * through SES). The user is still created with the temporary password and is
+   * still forced to change it on first sign-in.
+   */
+  suppressInviteEmail?: boolean;
 }
 
 /** Thin abstraction over the Cognito admin IDP API (software-token MFA). */
 export interface CognitoGateway {
   /** Start password auth. Throws 401 on invalid credentials. */
   initiateAuth(username: string, password: string): Promise<AuthStartResult>;
+  /**
+   * Check a candidate password for an account WITHOUT completing a sign-in.
+   * Used by the self-service password change to prove the caller knows the
+   * current password. A wrong password resolves to `false` — it never throws
+   * for that case — so callers can answer a clean 400 instead of a 401 that
+   * the frontend's session self-heal would treat as a dead session.
+   */
+  verifyPassword(username: string, password: string): Promise<boolean>;
+  /**
+   * Answer a NEW_PASSWORD_REQUIRED challenge (first sign-in with the emailed
+   * temporary password) and return the next challenge.
+   */
+  respondToNewPassword(
+    username: string,
+    session: string,
+    newPassword: string
+  ): Promise<AuthStartResult>;
   /** Return the pool user's `sub` for a username. */
   getUserSub(username: string): Promise<string>;
   /** Begin TOTP enrollment for an MFA_SETUP session (AssociateSoftwareToken). */
@@ -108,6 +139,12 @@ export interface CognitoGateway {
   ): Promise<AuthCompleteResult>;
   /** Create (or update) the pool user. MFA is enforced by the pool itself. */
   provisionUser(params: ProvisionParams): Promise<{ sub: string }>;
+  /**
+   * Re-send Cognito's own invitation message for an existing pool user. Used as
+   * a fallback when the caller's own invite email could not be delivered, so a
+   * new admin is never left without credentials.
+   */
+  resendInvite(username: string): Promise<void>;
   /** Set a new permanent password for the pool user. */
   setPassword(username: string, newPassword: string): Promise<void>;
   /** Request a password-reset code (Cognito emails a 6-digit code). */
@@ -261,16 +298,107 @@ class AwsCognitoGateway implements CognitoGateway {
         );
       }
 
-      if (res.ChallengeName === 'NEW_PASSWORD_REQUIRED') {
-        throw badRequestError(
-          'A password change is required for this account. Ask an administrator to re-provision it.'
-        );
+      // First sign-in with the emailed temporary password → the admin must set
+      // a new password (POST /auth/admin/login/new-password) before the MFA
+      // challenges continue.
+      if (res.ChallengeName === 'NEW_PASSWORD_REQUIRED' && res.Session) {
+        return { challenge: 'NEW_PASSWORD_REQUIRED', session: res.Session };
       }
       throw serverError(
         `Unexpected Cognito challenge: ${res.ChallengeName || 'none'}.`
       );
     } catch (err) {
       if (err instanceof AppError) throw err;
+      this.mapAuthError(err);
+    }
+  }
+
+  async verifyPassword(username: string, password: string): Promise<boolean> {
+    try {
+      await this.getClient().send(
+        new AdminInitiateAuthCommand({
+          UserPoolId: this.poolId,
+          ClientId: this.clientId,
+          AuthFlow: 'ADMIN_USER_PASSWORD_AUTH',
+          AuthParameters: {
+            USERNAME: username,
+            PASSWORD: password,
+            ...(this.secretHash(username)
+              ? { SECRET_HASH: this.secretHash(username) as string }
+              : {}),
+          },
+        })
+      );
+      // Any non-throwing response (SOFTWARE_TOKEN_MFA / MFA_SETUP /
+      // NEW_PASSWORD_REQUIRED) means Cognito accepted the password. Deliberately
+      // NOT reusing initiateAuth(): its fail-closed guard rejects a bare
+      // AuthenticationResult (a pool not enforcing MFA) and would report a
+      // CORRECT password as wrong.
+      return true;
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      const name = (err as { name?: string })?.name || '';
+      if (
+        name === 'NotAuthorizedException' ||
+        name === 'UserNotFoundException' ||
+        name === 'UserNotConfirmedException' ||
+        name === 'PasswordResetRequiredException' ||
+        name === 'InvalidParameterException'
+      ) {
+        return false;
+      }
+      console.error('[cognito] verifyPassword error:', (err as Error)?.message || err);
+      throw serverError('Failed to verify the current password.');
+    }
+  }
+
+  async respondToNewPassword(
+    username: string,
+    session: string,
+    newPassword: string
+  ): Promise<AuthStartResult> {
+    try {
+      const res = await this.getClient().send(
+        new AdminRespondToAuthChallengeCommand({
+          UserPoolId: this.poolId,
+          ClientId: this.clientId,
+          ChallengeName: 'NEW_PASSWORD_REQUIRED',
+          Session: session,
+          ChallengeResponses: {
+            USERNAME: username,
+            NEW_PASSWORD: newPassword,
+            ...(this.secretHash(username)
+              ? { SECRET_HASH: this.secretHash(username) as string }
+              : {}),
+          },
+        })
+      );
+
+      if (res.ChallengeName === 'SOFTWARE_TOKEN_MFA' && res.Session) {
+        return { challenge: 'SOFTWARE_TOKEN_MFA', session: res.Session };
+      }
+      if (res.ChallengeName === 'MFA_SETUP' && res.Session) {
+        return { challenge: 'MFA_SETUP', session: res.Session };
+      }
+      // Fail closed — same rule as initiateAuth: a bare AuthenticationResult
+      // must never be treated as a completed sign-in (MFA is mandatory).
+      if (res.AuthenticationResult) {
+        throw forbiddenError(
+          'Two-factor authentication is not enabled for this account. Please contact an administrator.'
+        );
+      }
+      throw serverError(
+        `Unexpected Cognito challenge after password change: ${res.ChallengeName || 'none'}.`
+      );
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      const name = (err as { name?: string })?.name || '';
+      if (name === 'InvalidPasswordException') {
+        throw badRequestError('The new password does not meet the password policy.');
+      }
+      if (name === 'NotAuthorizedException') {
+        throw unauthorizedError('Invalid or expired session.');
+      }
       this.mapAuthError(err);
     }
   }
@@ -399,6 +527,11 @@ class AwsCognitoGateway implements CognitoGateway {
       }
 
       if (!exists) {
+        // New user → Cognito owns the initial credential and leaves the user in
+        // FORCE_CHANGE_PASSWORD, so the first sign-in returns
+        // NEW_PASSWORD_REQUIRED. The invitation email is suppressed when the
+        // caller sends its own (POST /admins uses SES) — suppression does not
+        // affect the forced change.
         await this.getClient().send(
           new AdminCreateUserCommand({
             UserPoolId: this.poolId,
@@ -407,30 +540,55 @@ class AwsCognitoGateway implements CognitoGateway {
               { Name: 'email', Value: username },
               { Name: 'email_verified', Value: 'true' },
             ],
-            // Never let Cognito email a temp password — we set it ourselves
-            // right below (and print/record it in the provisioning script).
-            MessageAction: 'SUPPRESS',
+            TemporaryPassword: password,
+            ...(params.suppressInviteEmail
+              ? { MessageAction: 'SUPPRESS' }
+              : { DesiredDeliveryMediums: ['EMAIL'] }),
+          })
+        );
+      } else {
+        // Re-provisioning an existing pool user sends no invitation, so apply
+        // the password as permanent (bypasses NEW_PASSWORD_REQUIRED). MFA is
+        // enforced by the pool (MfaConfiguration ON): the next sign-in returns
+        // MFA_SETUP so the admin scans a QR code.
+        await this.getClient().send(
+          new AdminSetUserPasswordCommand({
+            UserPoolId: this.poolId,
+            Username: username,
+            Password: password,
+            Permanent: true,
           })
         );
       }
-
-      // Permanent password → CONFIRMED user, so no NEW_PASSWORD_REQUIRED.
-      // MFA itself is enforced by the pool (MfaConfiguration ON): on first
-      // sign-in Cognito returns MFA_SETUP so the admin scans a QR code.
-      await this.getClient().send(
-        new AdminSetUserPasswordCommand({
-          UserPoolId: this.poolId,
-          Username: username,
-          Password: password,
-          Permanent: true,
-        })
-      );
 
       return { sub: await this.getUserSub(username) };
     } catch (err) {
       if (err instanceof AppError) throw err;
       console.error('[cognito] provision error:', (err as Error)?.message || err);
       throw serverError('Failed to provision the Cognito user.');
+    }
+  }
+
+  /**
+   * Re-send Cognito's own invitation message for an existing pool user, keeping
+   * the same temporary password. Used when our SES invitation could not be
+   * delivered.
+   */
+  async resendInvite(username: string): Promise<void> {
+    this.assertConfigured();
+    try {
+      await this.getClient().send(
+        new AdminCreateUserCommand({
+          UserPoolId: this.poolId,
+          Username: username,
+          MessageAction: 'RESEND',
+          DesiredDeliveryMediums: ['EMAIL'],
+        })
+      );
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      console.error('[cognito] resendInvite error:', (err as Error)?.message || err);
+      throw serverError('Failed to resend the Cognito invitation.');
     }
   }
 
@@ -544,12 +702,22 @@ class AwsCognitoGateway implements CognitoGateway {
     } catch (err) {
       if (err instanceof AppError) throw err;
       const name = (err as { name?: string })?.name || '';
+      // A wrong/expired code and a rejected password are both 400s, but the
+      // admin cannot fix one by retyping the other — keep the messages
+      // distinct so a weak password is not reported as a bad code.
+      // The admin never types the code — it travels inside the emailed link —
+      // so a rejected code is described as a bad link, not as bad input.
       if (
-        ['CodeMismatchException', 'ExpiredCodeException', 'InvalidPasswordException', 'UserNotFoundException'].includes(
-          name
-        )
+        name === 'CodeMismatchException' ||
+        name === 'ExpiredCodeException' ||
+        name === 'UserNotFoundException'
       ) {
-        throw badRequestError('Invalid verification code or password.');
+        throw badRequestError(
+          'This password reset link is invalid or has expired. Request a new one.'
+        );
+      }
+      if (name === 'InvalidPasswordException') {
+        throw badRequestError(PASSWORD_POLICY_MESSAGE);
       }
       console.error('[cognito] confirmForgotPassword error:', (err as Error)?.message || err);
       throw serverError('Failed to reset the password.');
@@ -672,6 +840,15 @@ class OfflineCognitoGateway implements CognitoGateway {
     if (!passwordMatches) {
       throw unauthorizedError('Invalid credentials.');
     }
+    // A freshly created admin must replace the temporary password first. The
+    // real pool enforces this with FORCE_CHANGE_PASSWORD; mirror it offline so
+    // the forced-change step is testable without a live pool.
+    if (admin.mustChangePassword) {
+      return {
+        challenge: 'NEW_PASSWORD_REQUIRED',
+        session: this.issueSession(admin.emailAddress, 'challenge'),
+      };
+    }
     // Offline: enrolled admins get a code challenge; everyone else is pushed
     // through the QR enrollment (MFA_SETUP) so the setup step is testable
     // without a live pool.
@@ -680,6 +857,42 @@ class OfflineCognitoGateway implements CognitoGateway {
       console.warn(
         `[cognito:offline] TOTP dev code for ${admin.emailAddress}: ${OfflineCognitoGateway.DEV_CODE}`
       );
+      return {
+        challenge: 'SOFTWARE_TOKEN_MFA',
+        session: this.issueSession(admin.emailAddress, 'challenge'),
+      };
+    }
+    return {
+      challenge: 'MFA_SETUP',
+      session: this.issueSession(admin.emailAddress, 'setup'),
+    };
+  }
+
+  async verifyPassword(username: string, password: string): Promise<boolean> {
+    // Offline there is no pool, so the Mongo bcrypt hash IS the credential
+    // store (the same one initiateAuth compares against).
+    const admin = await this.findAdminByEmail(username);
+    if (!admin || !admin.passwordHash) return false;
+    return comparePassword(password, admin.passwordHash);
+  }
+
+  async respondToNewPassword(
+    username: string,
+    session: string,
+    _newPassword: string
+  ): Promise<AuthStartResult> {
+    // Offline there is no pool, so initiateAuth never emits
+    // NEW_PASSWORD_REQUIRED (admins go straight to MFA_SETUP). Accept the
+    // change for parity and hand back the next challenge.
+    const payload = parseOfflineSession(session);
+    if (!payload || payload.username !== username.toLowerCase()) {
+      throw unauthorizedError('Invalid or expired session.');
+    }
+    const admin = await Admin.findOne({ emailAddress: username.toLowerCase() });
+    if (!admin) {
+      throw unauthorizedError('Invalid credentials.');
+    }
+    if (admin.mfaEnrolled) {
       return {
         challenge: 'SOFTWARE_TOKEN_MFA',
         session: this.issueSession(admin.emailAddress, 'challenge'),
@@ -742,12 +955,7 @@ class OfflineCognitoGateway implements CognitoGateway {
     code: string
   ): Promise<AuthCompleteResult> {
     const payload = parseOfflineSession(session);
-    if (
-      !payload ||
-      payload.kind !== 'challenge' ||
-      payload.username !== username.toLowerCase() ||
-      !(await this.codeIsValid(payload, code))
-    ) {
+    if (!payload || !(await this.codeIsValid(payload, code))) {
       throw unauthorizedError('Invalid or expired verification code.');
     }
     const admin = await Admin.findOne({ emailAddress: username.toLowerCase() });
@@ -756,7 +964,30 @@ class OfflineCognitoGateway implements CognitoGateway {
 
   async provisionUser(params: ProvisionParams): Promise<{ sub: string }> {
     // Offline: Mongo is the source of truth; there is no separate pool user.
+    // Mark the account as needing a password change so initiateAuth returns
+    // NEW_PASSWORD_REQUIRED, matching a new pool user in FORCE_CHANGE_PASSWORD.
+    const admin = await Admin.findOne({ emailAddress: params.username.toLowerCase() });
+    if (admin) {
+      admin.mustChangePassword = true;
+      await admin.save().catch(() => null);
+    }
+    // The temporary password is logged the way the offline forgot-password flow
+    // logs its dev code, so local sign-in stays testable if the SES mail never
+    // arrives.
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[cognito:offline] Temporary password for ${params.username}: ${params.password}`
+    );
     return { sub: params.username };
+  }
+
+  async resendInvite(username: string): Promise<void> {
+    // Offline there is no email; provisionUser already logged the temporary
+    // password, so this only records that the fallback would have fired.
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[cognito:offline] Invitation for ${username} "resent" — see the Temporary password line above.`
+    );
   }
 
   async setAccountStatus(): Promise<void> {
@@ -795,7 +1026,9 @@ class OfflineCognitoGateway implements CognitoGateway {
 
   async confirmForgotPassword(username: string, code: string, newPassword: string): Promise<void> {
     if (code !== OfflineCognitoGateway.DEV_CODE) {
-      throw badRequestError('Invalid verification code.');
+      throw badRequestError(
+        'This password reset link is invalid or has expired. Request a new one.'
+      );
     }
     const admin = await Admin.findOne({ emailAddress: username.toLowerCase() });
     if (!admin) throw unauthorizedError('Invalid credentials.');

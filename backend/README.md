@@ -93,6 +93,7 @@ cp .env.example .env
 | `COGNITO_REGION`       | Region of the user pool               | `ap-southeast-1` |
 | `COGNITO_OFFLINE`      | Use the in-process Cognito stub for local dev (no AWS) | `false` |
 | `COGNITO_PROVISION_PASSWORD` | Initial password `provision:cognito` sets for seed admins | — |
+| `WEBSOCKET_ENDPOINT` | management-API endpoint for real-time pushes (`src/shared/ws.ts`). Empty ⇒ `broadcastToAdmin` no-ops. Local `serverless offline` emulates the WS API on port **3001**; deployed value is `wss://<api-id>.execute-api.<region>.amazonaws.com/<stage>` | `http://localhost:3001` |
 
 > Admin login uses **AWS Cognito User Pools with software-token MFA (TOTP —
 > Google Authenticator)** — see `docs/ARCHITECTURE.md` §5a and the console
@@ -115,6 +116,17 @@ The API is then served at `http://localhost:3000`.
 > a live pool, set `COGNITO_OFFLINE=true` in `.env` — the backend then verifies
 > admin passwords against Mongo and accepts the dev TOTP code `123456` (see
 > `src/shared/cognito.ts`). Example warm-up:
+
+> **Route-table changes need a FULL restart.** Adding or renaming a function or
+> route in `serverless.yml` requires stopping `npm run offline` (and freeing
+> port 3000) before starting it again, otherwise requests 404 with
+> `Serverless-offline: route not found.`
+>
+> **Handler-code edits need a restart too.** `reloadHandler` is deliberately OFF:
+> with it on, serverless-offline builds a fresh worker thread — and therefore a
+> fresh MongoDB connection to Atlas — for *every* request (~1.5s added to each
+> call). Use `npm run offline:reload` while you are actively editing a handler;
+> it is slower per request but applies code changes immediately.
 
 ```bash
 curl -X POST http://localhost:3000/auth/register \
@@ -143,10 +155,29 @@ After deployment, Serverless prints the API Gateway endpoint:
 | Command                  | Description                              |
 | ------------------------ | ---------------------------------------- |
 | `npm run typecheck`      | Run `tsc --noEmit`                       |
-| `npm run build`          | `serverless package` (bundle + validate) |
-| `npm run deploy`         | Deploy to AWS                            |
+| `npm run verify:routes`  | Route parity guard (frontend contract ↔ `serverless.yml`) |
+| `npm run build`          | `serverless package` (bundle + validate; runs `verify:routes` first) |
+| `npm run deploy`         | Deploy to AWS (runs `verify:routes` first) |
 | `npm run offline`        | Run API locally via serverless-offline   |
 | `npm run lint`           | Run ESLint on `src`                      |
+
+### Route parity guard
+
+`serverless.yml` is the only place HTTP routes are registered, and a missing
+route is not a compile error — the frontend simply receives a 404. This has
+regressed twice (the admin MFA/Cognito and `ws-token` routes), so
+`npm run verify:routes` (`scripts/verify-routes.mjs`) checks that:
+
+- every `handler: <module>.<export>` points at a file that exports that symbol;
+- no `METHOD path` is declared twice;
+- every route in the script's `REQUIRED_ROUTES` (the auth surface contract) is
+  declared, with the expected authorizer;
+- every `/api/auth/...` literal the frontend calls maps to a declared route and
+  is listed in `REQUIRED_ROUTES` (so the list cannot silently go stale).
+
+It runs automatically before `npm run build` and `npm run deploy`, so removing a
+route from `serverless.yml` fails the build instead of 404-ing at runtime. When
+you add an auth route, add it to `REQUIRED_ROUTES` too.
 
 ## Adding a New Feature
 

@@ -24,6 +24,20 @@ export interface IAdmin extends Document {
   totpSecret?: string; // AES-256-GCM encrypted at rest, select: false
   totpVerified: boolean;
   backupCodes?: string[]; // bcrypt-hashed recovery codes, select: false
+  /**
+   * Password-reset link state (see src/features/auth/admin-forgot/handler.ts).
+   * Only the SHA-256 hash of the emailed token is stored, so the raw link
+   * cannot be recovered from the database.
+   */
+  passwordResetTokenHash?: string; // select: false
+  passwordResetExpiresAt?: Date;
+  passwordResetRequestedAt?: Date;
+  /**
+   * True while the admin still holds the temporary password from
+   * `POST /admins`. The real pool enforces this with FORCE_CHANGE_PASSWORD;
+   * offline this flag is what makes the stub return NEW_PASSWORD_REQUIRED.
+   */
+  mustChangePassword?: boolean;
   createdAt: Date;
   lastLogin?: Date;
   toPublicJSON(): Record<string, unknown>;
@@ -67,6 +81,13 @@ const adminSchema = new Schema<IAdmin>(
     totpVerified: { type: Boolean, default: false },
     // Recovery codes hashed with bcrypt; never selected by default.
     backupCodes: { type: [String], select: false },
+    // Password-reset link state: only the SHA-256 hash of the emailed token.
+    // A fresh request overwrites both fields, which invalidates the old link.
+    passwordResetTokenHash: { type: String, select: false, index: true, sparse: true },
+    passwordResetExpiresAt: { type: Date },
+    passwordResetRequestedAt: { type: Date },
+    // Set by POST /admins; cleared once the admin sets their own password.
+    mustChangePassword: { type: Boolean, default: false },
     lastLogin: { type: Date },
   },
   { timestamps: true }
@@ -75,6 +96,10 @@ const adminSchema = new Schema<IAdmin>(
 /** Returns a plain object without sensitive fields. */
 adminSchema.methods.toPublicJSON = function () {
   const obj = this.toObject();
+  delete obj.passwordResetTokenHash;
+  delete obj.passwordResetExpiresAt;
+  delete obj.passwordResetRequestedAt;
+  delete obj.mustChangePassword; // internal first-login state
   delete obj.passwordHash;
   delete obj.cognitoSub; // internal AWS link — never expose to clients
   delete obj.mfaEnrolled; // internal MFA state — never expose to clients

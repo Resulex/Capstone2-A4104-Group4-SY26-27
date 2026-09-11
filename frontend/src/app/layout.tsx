@@ -1,15 +1,17 @@
 import type { Metadata } from "next";
-import { Roboto } from "next/font/google";
+import { Inter } from "next/font/google";
 import { AccessibilityThemeProvider } from "@/context/ThemeContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { ResidentProvider } from "@/context/ResidentContext";
 import ThemeRegistry from "@/theme/ThemeRegistry";
 import "./globals.css";
 
-const roboto = Roboto({
-  variable: "--font-roboto",
+// Inter is loaded as a variable font (no explicit `weight`), so every weight
+// used in the app — including the 800s in the resident incident views —
+// renders as a real Inter weight instead of a synthesized one.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["300", "400", "500", "700"],
   display: "swap",
 });
 
@@ -29,7 +31,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={roboto.variable}>
+    <html lang="en" className={inter.variable}>
       <body>
         <AccessibilityThemeProvider>
           <AuthProvider>
