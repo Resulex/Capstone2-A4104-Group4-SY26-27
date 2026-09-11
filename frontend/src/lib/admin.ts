@@ -1,4 +1,4 @@
-import { deleteApi, getApi, patchApi, postApi } from "@/lib/api";
+import { deleteApi, fetchJson, getApi, patchApi, postApi } from "@/lib/api";
 
 /**
  * Data types + fetch helpers for the admin residents and document-request
@@ -339,6 +339,24 @@ export async function fetchAdminWsToken(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Request an admin password-reset email via POST /auth/admin/forgot-password.
+ *
+ * Uses the `next.config.ts` rewrite for `/api/auth/admin/*` (the same path the
+ * admin login flow takes) rather than `postApi`, which would double-proxy it
+ * through `/api/backend`. The backend answers with the same generic success for
+ * every address, so resolving does not confirm that the account exists.
+ */
+export async function requestAdminPasswordReset(email: string): Promise<void> {
+  await fetchJson<{ data?: { message?: string } }>(
+    "/api/auth/admin/forgot-password",
+    {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    },
+  );
 }
 
 /** Mark a notification read/unread via PATCH. */

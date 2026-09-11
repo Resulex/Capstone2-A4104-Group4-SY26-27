@@ -45,6 +45,47 @@ const CIVIC_SECONDARY = {
 };
 
 /**
+ * App-shell chrome tokens (headers + sidebars) — single source of truth.
+ *
+ * Light civic washes for the surfaces, with text that is a *tonal dark* of the
+ * surface it sits on instead of neutral black: the soft blue header gets deep
+ * civic blue, the near-neutral sidebar gets dark slate. Both text values
+ * already exist in the palette above, so nothing new is invented here.
+ */
+const SHELL_HEADER = "#E8F1FA";
+const SHELL_SIDEBAR = "#F4F8FC";
+const SHELL_HEADER_TEXT = "#083C6B";
+const SHELL_SIDEBAR_TEXT = "#1B2733";
+
+/**
+ * Resolve the app-shell colours for the current accessibility setting.
+ *
+ * High-contrast mode drops the tints for plain white surfaces and pure black
+ * text — the washes are decorative, and every extra tint costs contrast.
+ */
+export function getShellColors(highContrast: boolean): {
+  header: string;
+  sidebar: string;
+  headerText: string;
+  sidebarText: string;
+} {
+  if (highContrast) {
+    return {
+      header: "#FFFFFF",
+      sidebar: "#FFFFFF",
+      headerText: "#000000",
+      sidebarText: "#000000",
+    };
+  }
+  return {
+    header: SHELL_HEADER,
+    sidebar: SHELL_SIDEBAR,
+    headerText: SHELL_HEADER_TEXT,
+    sidebarText: SHELL_SIDEBAR_TEXT,
+  };
+}
+
+/**
  * High-contrast palette (WCAG 2.1 AA/AAA oriented).
  * Uses near-black on yellow / white for maximum contrast and large type pairs.
  */

@@ -13,10 +13,20 @@ export interface IApplicantDetails {
   emailAddress: string;
 }
 
+/** Who recorded a timeline entry — denormalized so it survives profile renames. */
+export interface IDocumentChangeActor {
+  userId: string;
+  fullName: string;
+}
+
 export interface IDocumentTimeline {
   step: string;
   date: Date;
   status: string;
+  /** Note attached to this status change (e.g. the rejection reason). */
+  remarks?: string;
+  /** Officer/admin who made the change — rendered only in admin views. */
+  changedBy?: IDocumentChangeActor;
 }
 
 export interface IDocumentRequest extends Document {
@@ -43,11 +53,21 @@ const applicantDetailsSchema = new Schema<IApplicantDetails>(
   { _id: false }
 );
 
+const changeActorSchema = new Schema<IDocumentChangeActor>(
+  {
+    userId: { type: String, required: true, trim: true },
+    fullName: { type: String, required: true, trim: true },
+  },
+  { _id: false }
+);
+
 const timelineSchema = new Schema<IDocumentTimeline>(
   {
     step: { type: String, required: true, trim: true },
     date: { type: Date, required: true },
     status: { type: String, required: true, trim: true },
+    remarks: { type: String, trim: true },
+    changedBy: { type: changeActorSchema },
   },
   { _id: false }
 );
