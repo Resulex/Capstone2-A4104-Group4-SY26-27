@@ -31,9 +31,30 @@ ROLE_NAME="${ROLE_NAME:-GitHubActionsDeploy-KaBarangayConnect}"
 POLICY_NAME="${POLICY_NAME:-kabarangayconnect-deploy}"
 OIDC_HOST="${OIDC_HOST:-token.actions.githubusercontent.com}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+# Two separate things change the OIDC `sub` claim, and the role's trust policy
+# below has to allow all four combinations or STS rejects the token with
+# "Not authorized to perform sts:AssumeRoleWithWebIdentity":
+#
+#  1. A job declaring `environment: <name>` sends
+#     `repo:OWNER/REPO:environment:<name>` instead of `...:ref:refs/heads/<branch>`.
+#  2. Repositories created after 2026-07-15 use "immutable subject claims",
+#     which embed numeric IDs: `repo:OWNER@OWNER-ID/REPO@REPO-ID:...`.
+#     This repo was created 2026-08-21, so it is on the immutable format.
+ENVIRONMENT_NAME="${ENVIRONMENT_NAME:-production}"
+# Repository identity for the subject claim. The `*` ID defaults keep this
+# working without a lookup; to pin exactly, set the numeric IDs from:
+#   gh api repos/OWNER/REPO --jq '.owner.id, .id'
+OIDC_OWNER="${REPO_SLUG%%/*}"
+OIDC_REPO="${REPO_SLUG##*/}"
+OIDC_OWNER_ID="${OIDC_OWNER_ID:-*}"
+OIDC_REPO_ID="${OIDC_REPO_ID:-*}"
 AWS_REGION="${AWS_REGION:-ap-southeast-1}"
+# Exported so the AWS CLI (a child process) actually uses this region; without
+# it `aws amplify ...` falls back to the CLI profile's default region.
+export AWS_REGION
 STAGE="${STAGE:-dev}"
-AMPLIFY_APP_NAME="${AMPLIFY_APP_NAME:-kabarangayconnect-frontend}"
+# Name of the existing Amplify app as shown in the console (not the App ID).
+AMPLIFY_APP_NAME="${AMPLIFY_APP_NAME:-Capstone2-A4104-Group4-SY26-27}"
 AMPLIFY_BRANCH_NAME="${AMPLIFY_BRANCH_NAME:-main}"
 API_BACKEND_URL="${API_BACKEND_URL:-https://5p91o0g2ea.execute-api.ap-southeast-1.amazonaws.com}"
 # Serverless provisions its deployment bucket and Lambda execution role under
@@ -97,8 +118,15 @@ cat > "${WORK_DIR}/trust.json" <<JSON
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "${OIDC_HOST}:aud": "sts.amazonaws.com",
-          "${OIDC_HOST}:sub": "repo:${REPO_SLUG}:ref:refs/heads/${DEPLOY_BRANCH}"
+          "${OIDC_HOST}:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "${OIDC_HOST}:sub": [
+            "repo:${OIDC_OWNER}/${OIDC_REPO}:environment:${ENVIRONMENT_NAME}",
+            "repo:${OIDC_OWNER}/${OIDC_REPO}:ref:refs/heads/${DEPLOY_BRANCH}",
+            "repo:${OIDC_OWNER}@${OIDC_OWNER_ID}/${OIDC_REPO}@${OIDC_REPO_ID}:environment:${ENVIRONMENT_NAME}",
+            "repo:${OIDC_OWNER}@${OIDC_OWNER_ID}/${OIDC_REPO}@${OIDC_REPO_ID}:ref:refs/heads/${DEPLOY_BRANCH}"
+          ]
         }
       }
     }
@@ -163,7 +191,8 @@ cat > "${WORK_DIR}/policy.json" <<JSON
       "Effect": "Allow",
       "Action": [
         "apigateway:GET", "apigateway:POST", "apigateway:PUT",
-        "apigateway:PATCH", "apigateway:DELETE"
+        "apigateway:PATCH", "apigateway:DELETE",
+        "apigateway:TagResource", "apigateway:UntagResource"
       ],
       "Resource": "arn:aws:apigateway:${AWS_REGION}::/*"
     },
