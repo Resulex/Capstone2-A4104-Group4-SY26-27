@@ -12,6 +12,18 @@ const API_BACKEND_URL = process.env.API_BACKEND_URL ?? "http://localhost:3000";
  */
 const API_BACKEND_STAGE = process.env.API_BACKEND_STAGE ?? "dev";
 
+// A production build without API_BACKEND_URL bakes http://localhost:3000 into
+// both the rewrites below and the `env` block above — every deployed
+// /api/backend/* call would then hit the Next server itself and answer
+// "Empty response from backend." (which is exactly what happened on Amplify,
+// 2026-09-12). Warn here, where it is still cheap to fix.
+if (process.env.NODE_ENV === "production" && !process.env.API_BACKEND_URL) {
+  console.warn(
+    "[next.config] API_BACKEND_URL is not set — this build will proxy the backend to " +
+      "http://localhost:3000. Set it on the hosting platform before deploying.",
+  );
+}
+
 /**
  * Base URL of the backend WebSocket server. Must match
  * `custom.serverless-offline.websocketPort` in backend/serverless.yml
@@ -25,6 +37,27 @@ const API_WEBSOCKET_URL = process.env.API_WEBSOCKET_URL ?? "ws://localhost:3001"
 void API_WEBSOCKET_URL;
 
 const nextConfig: NextConfig = {
+  // Inline the backend location at BUILD time.
+  //
+  // The route handlers under `src/app/api/**` (the `/api/backend/[...path]`
+  // cookie→Bearer proxy and `lib/session-guard.ts`) read these two values while
+  // serving a request. Amplify Hosting gives the branch environment variables to
+  // the build but not to the SSR compute, so those runtime lookups fell through
+  // to the `http://localhost:3000` default — the SSR server calling itself —
+  // and every `/api/backend/*` request answered 404 "Empty response from
+  // backend." The `rewrites()` below were unaffected because Next resolves them
+  // at build time, which is why only part of the app broke.
+  //
+  // `env` makes Next substitute the literals into the bundle, so request-time
+  // code uses the same values the rewrites already use. Neither value is a
+  // secret (a public API URL and a stage name).
+  //
+  // Consequence: these are fixed per build. Changing them on the hosting
+  // platform requires a new frontend build, exactly like the rewrites.
+  env: {
+    API_BACKEND_URL,
+    API_BACKEND_STAGE,
+  },
   images: {
     remotePatterns: [
       // Allow remote media (S3 uploads, Google profile images) through the

@@ -15,8 +15,11 @@ login flow uses (hybrid auth: Cognito verifies password + **software-token MFA
   (default `ap-southeast-1`). Pick the region **top-right** first and keep it
   consistent for steps below.
 - Your backend code is deployed with Serverless (`sls deploy`) — the Lambda
-  role already includes the `cognito-idp` permissions, and the new login
-  endpoints are registered. You only manage the pool/app client here.
+  execution role's `cognito-idp` permissions come from
+  `provider.iam.role.statements` in `serverless.yml` (added 2026-09-12 after the
+  deployed login failed with `AccessDeniedException` on `AdminInitiateAuth`),
+  and the login endpoints are registered. You only manage the pool/app client
+  here.
 - The **Admin email** in Cognito must exactly match a Mongo `Admin`
   `emailAddress` (that is how login maps the Cognito user to the admin).
 
@@ -117,8 +120,12 @@ itself is always logged on the line above, so the flow stays testable locally.
 1. Inside your pool, open **App integration** → **App clients and analytics**.
 2. Click **Create app client**.
 3. App client name: `kabarangayconnect-backend-admin`.
-4. **Client secret**: uncheck / do **NOT generate a client secret** (our Lambda
-   uses the admin API, which needs only the client id).
+4. **Client secret**: uncheck / do **NOT generate a client secret** (the admin
+   API needs only the client id). If you do generate one, you must set
+   `COGNITO_CLIENT_SECRET` in `backend/.env` (local) **and** as the GitHub
+   secret `COGNITO_CLIENT_SECRET` (deployed) — the gateway then sends
+   `SECRET_HASH` (HMAC-SHA256 of `username + clientId`) with every challenge
+   call, and a Lambda that cannot read the secret is rejected by Cognito.
 5. Expand **App client authentication flow settings** (or *Authentication
    flows* on some console versions) and enable:
    - ✅ **ALLOW_ADMIN_USER_PASSWORD_AUTH** (username-password for admin APIs)
@@ -170,6 +177,8 @@ Edit `backend/.env` (gitignored) and add:
 ```dotenv
 COGNITO_USER_POOL_ID=ap-southeast-1_AbCdEfGhI
 COGNITO_CLIENT_ID=1abcdefg234567...
+# Only when the app client was created WITH a client secret (§2, step 4).
+COGNITO_CLIENT_SECRET=
 COGNITO_REGION=ap-southeast-1
 COGNITO_OFFLINE=false
 ```
@@ -206,6 +215,18 @@ npm run deploy        # or: npx serverless deploy
 
 - **Region mismatch:** the pool must be in `COGNITO_REGION` (default
   `ap-southeast-1`) where the Lambdas run.
+- **`/auth/admin/login` returns 500 `Authentication service error.`:** that is
+  the gateway's catch-all for any Cognito error it does not map to a 401
+  (`shared/cognito.ts` → `mapAuthError`), so the reason is only in the Lambda
+  log line `[cognito] auth error: …`. Seen so far:
+  - `… is not authorized to perform: cognito-idp:AdminInitiateAuth` — the
+    Lambda role is missing the grant; fix `provider.iam.role.statements` in
+    `serverless.yml` and redeploy (a console-attached inline policy is not
+    reproducible and will not survive a stack rebuild).
+  - `ResourceNotFoundException` — the deployed `COGNITO_USER_POOL_ID` /
+    `COGNITO_CLIENT_ID` / `COGNITO_REGION` do not match the pool.
+  - anything mentioning `SECRET_HASH` — the app client has a secret the
+    Lambda never received; see §2, step 4.
 - **`/auth/admin/login` returns 500 "Cognito is not configured":** the
   `COGNITO_USER_POOL_ID` / `COGNITO_CLIENT_ID` env vars are missing on the
   deployed functions — set them in `.env` and redeploy.

@@ -29,6 +29,17 @@
  *    `lambdaPort` 3002 (an HTTP invoke endpoint) and every handshake 404'd.
  *    A loopback `WEBSOCKET_ENDPOINT` in `backend/.env` is reported as a
  *    warning (it is right for offline, wrong for a deploy).
+ * 7. Cognito IAM parity: every `*Command` that `src/shared/cognito.ts` imports
+ *    from the Cognito IDP SDK is granted to the Lambda execution role, and
+ *    `provider.environment` declares `COGNITO_CLIENT_SECRET`. Neither failure
+ *    is a compile error nor a deploy error — the deployed admin login just
+ *    answers 500 "Authentication service error." (AccessDenied on
+ *    `AdminInitiateAuth`, 2026-09-12) or silently drops SECRET_HASH.
+ *
+ * It also warns when `backend/.env` holds values that are right for offline dev
+ * but get baked into the stage by a developer-machine `npm run deploy`
+ * (`COGNITO_OFFLINE=true`, loopback `WEBSOCKET_ENDPOINT` / `APP_BASE_URL` /
+ * `GOOGLE_REDIRECT_URI`) — the pipeline overrides all of them.
  *
  * Usage: npm run verify:routes   (also runs before build/deploy)
  */
@@ -234,16 +245,41 @@ if (!Object.hasOwn(providerEnvironment, 'WEBSOCKET_ENDPOINT')) {
 // stage. src/shared/ws.ts refuses loopback inside Lambda, so this is a warning.
 const backendEnvPath = path.join(backendRoot, '.env');
 if (existsSync(backendEnvPath)) {
-  const match = readFileSync(backendEnvPath, 'utf8').match(
-    /^\s*WEBSOCKET_ENDPOINT\s*=\s*(\S*)\s*$/m,
-  );
-  const endpoint = match?.[1] ?? '';
-  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(endpoint)) {
+  const envFile = readFileSync(backendEnvPath, 'utf8');
+  const envFileValue = (key) => envFile.match(new RegExp(`^\\s*${key}\\s*=\\s*(\\S*)\\s*$`, 'm'))?.[1] ?? '';
+  const isLoopback = (value) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(value);
+
+  const endpoint = envFileValue('WEBSOCKET_ENDPOINT');
+  if (isLoopback(endpoint)) {
     warn(
       `backend/.env sets WEBSOCKET_ENDPOINT=${endpoint} (loopback). Correct for \`npm run offline\`,\n` +
         '      but unset it before deploying: src/shared/ws.ts refuses loopback endpoints inside Lambda,\n' +
         '      so the deployed stage would silently fall back to polling.',
     );
+  }
+
+  // The rest of these are the same trap in a nastier form: a local deploy
+  // overrides the values the CI workflow sets, and nothing about the deploy
+  // itself looks wrong. These ARE live in the deployed stage after such a run.
+  if (['true', '1'].includes(envFileValue('COGNITO_OFFLINE').toLowerCase())) {
+    warn(
+      'backend/.env sets COGNITO_OFFLINE=true. Correct for `npm run offline`, but a local `npm run deploy`\n' +
+        '      would ship the in-process Cognito stub: admin passwords verified against Mongo and the dev TOTP\n' +
+        '      code 123456 accepted by a deployed Lambda. The CI workflow forces it to false; prefer the pipeline.',
+    );
+  }
+
+  for (const [key, consequence] of [
+    ['APP_BASE_URL', 'password-reset links in outbound email would point at localhost'],
+    ['GOOGLE_REDIRECT_URI', 'resident Google SSO would redirect to localhost (and the Google console must allow it)'],
+  ]) {
+    const value = envFileValue(key);
+    if (isLoopback(value)) {
+      warn(
+        `backend/.env sets ${key}=${value} (loopback). A local \`npm run deploy\` would ship it and\n` +
+          `      ${consequence}. The CI workflow sets the deployed value.`,
+      );
+    }
   }
 }
 
@@ -290,6 +326,69 @@ if (existsSync(frontendEnvPath)) {
           `      custom.serverless-offline.websocketPort is ${websocketPort} — the handshake would 404.`,
       );
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 4d. Cognito IAM + environment parity (Lambda execution role)
+// ---------------------------------------------------------------------------
+// `src/shared/cognito.ts` calls the Cognito IDP admin API. A missing
+// `cognito-idp:*` grant is not a compile error and does not fail `sls deploy`:
+// the deployed Lambda simply gets AccessDeniedException, which the gateway's
+// `mapAuthError` fallback reports as 500 "Authentication service error." with no
+// hint that IAM was the cause. The same is true of an undeclared
+// COGNITO_CLIENT_SECRET — `${env:X}` only resolves for keys listed in
+// provider.environment, so the Lambda sends no SECRET_HASH.
+const cognitoSourcePath = path.join(backendRoot, 'src', 'shared', 'cognito.ts');
+if (existsSync(cognitoSourcePath)) {
+  const cognitoSource = readFileSync(cognitoSourcePath, 'utf8');
+  const sdkImport = cognitoSource.match(
+    /import\s*\{([\s\S]*?)\}\s*from\s*['"]@aws-sdk\/client-cognito-identity-provider['"]/,
+  );
+  const cognitoCommands = sdkImport
+    ? sdkImport[1]
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.endsWith('Command'))
+        // `AdminInitiateAuthCommand` -> the IAM action `cognito-idp:AdminInitiateAuth`.
+        .map((entry) => entry.slice(0, -'Command'.length))
+    : [];
+
+  const iamStatements = service?.provider?.iam?.role?.statements ?? [];
+  const grantedCognitoActions = new Set();
+  for (const statement of iamStatements) {
+    const actions = Array.isArray(statement?.Action) ? statement.Action : [statement?.Action];
+    const resources = Array.isArray(statement?.Resource) ? statement.Resource : [statement?.Resource];
+    // Only count grants scoped to a user pool: the admin API authorizes against
+    // `...:userpool/<pool-id>` (app clients are
+    // `...:userpool/<pool-id>/client/<client-id>`).
+    if (!resources.some((resource) => typeof resource === 'string' && resource.includes(':userpool/'))) {
+      continue;
+    }
+    for (const action of actions) {
+      if (typeof action !== 'string' || !action.startsWith('cognito-idp:')) continue;
+      grantedCognitoActions.add(
+        action === 'cognito-idp:*' ? '*' : action.slice('cognito-idp:'.length),
+      );
+    }
+  }
+
+  if (cognitoCommands.length === 0) {
+    warn('no Cognito IDP commands found in src/shared/cognito.ts — the IAM parity check had nothing to verify');
+  }
+  for (const command of cognitoCommands) {
+    if (grantedCognitoActions.has('*') || grantedCognitoActions.has(command)) continue;
+    fail(
+      `provider.iam.role.statements does not grant "cognito-idp:${command}" (used by src/shared/cognito.ts).\n` +
+        '      Deployed admin login then fails with AccessDeniedException -> 500 "Authentication service error.".',
+    );
+  }
+
+  if (!Object.hasOwn(providerEnvironment, 'COGNITO_CLIENT_SECRET')) {
+    fail(
+      'provider.environment is missing COGNITO_CLIENT_SECRET — src/shared/cognito.ts reads it to build SECRET_HASH.\n' +
+        '      `${env:...}` only resolves for keys declared in the provider environment block.',
+    );
   }
 }
 

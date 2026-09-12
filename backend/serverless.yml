@@ -38,6 +38,12 @@ provider:
     # Cognito and admin login fails closed.
     COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, ''}
     COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID, ''}
+    # Needed when the app client has a generated client secret: the SECRET_HASH
+    # sent with AdminInitiateAuth / AdminRespondToAuthChallenge is
+    # HMAC-SHA256(clientSecret, username + clientId). Declaring the key here is
+    # what makes `${env:...}` resolvable at all — a Lambda without it sends no
+    # SECRET_HASH and the challenge calls are rejected.
+    COGNITO_CLIENT_SECRET: ${env:COGNITO_CLIENT_SECRET, ''}
     COGNITO_REGION: ${env:COGNITO_REGION, ''}
     COGNITO_OFFLINE: ${env:COGNITO_OFFLINE, 'false'}
     # Admin password-reset email, sent by the backend via Amazon SES. The From
@@ -96,6 +102,34 @@ provider:
             - execute-api:ManageConnections
           Resource:
             - "arn:aws:execute-api:${env:AWS_REGION, 'ap-southeast-1'}:*:*"
+        # Admin auth: AWS Cognito User Pool (src/shared/cognito.ts). Without
+        # this the Lambda cannot call AdminInitiateAuth at all, and the gateway
+        # surfaces the AccessDenied as a 500 "Authentication service error."
+        # (this bit the deployed admin login on 2026-09-12). `userpool/*`
+        # covers both the pool ARN and its app-client ARNs; the two
+        # SoftwareToken calls are session-scoped and authorize against the pool.
+        # `verify:routes` asserts this list against the commands the gateway
+        # actually imports, so add an action here when adding one there.
+        # ForgotPassword/ConfirmForgotPassword are rollback-only (the live reset
+        # path uses AdminSetUserPassword).
+        - Effect: Allow
+          Action:
+            - cognito-idp:AdminInitiateAuth
+            - cognito-idp:AdminRespondToAuthChallenge
+            - cognito-idp:AdminGetUser
+            - cognito-idp:AdminCreateUser
+            - cognito-idp:AdminDeleteUser
+            - cognito-idp:AdminEnableUser
+            - cognito-idp:AdminDisableUser
+            - cognito-idp:AdminSetUserPassword
+            - cognito-idp:AdminSetUserMFAPreference
+            - cognito-idp:AdminDeleteSoftwareToken
+            - cognito-idp:AssociateSoftwareToken
+            - cognito-idp:VerifySoftwareToken
+            - cognito-idp:ForgotPassword
+            - cognito-idp:ConfirmForgotPassword
+          Resource:
+            - "arn:aws:cognito-idp:${env:AWS_REGION, 'ap-southeast-1'}:*:userpool/*"
 
 plugins:
   - serverless-esbuild

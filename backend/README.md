@@ -90,6 +90,7 @@ cp .env.example .env
 | `STAGE`         | Deployment stage                       | `dev` |
 | `COGNITO_USER_POOL_ID` | Admin Cognito User Pool id (create in the AWS console — see `docs/COGNITO_AWS_CONSOLE.md`) | `ap-southeast-1_AbCdEf` |
 | `COGNITO_CLIENT_ID`    | Admin Cognito app client id           | `1abcdefg...` |
+| `COGNITO_CLIENT_SECRET` | Client secret of that app client, when one was generated. Used to build `SECRET_HASH` for `AdminInitiateAuth` / `AdminRespondToAuthChallenge`; must reach the Lambdas (`serverless.yml` declares the key) | `1abcdef…` |
 | `COGNITO_REGION`       | Region of the user pool               | `ap-southeast-1` |
 | `COGNITO_OFFLINE`      | Use the in-process Cognito stub for local dev (no AWS) | `false` |
 | `COGNITO_PROVISION_PASSWORD` | Initial password `provision:cognito` sets for seed admins | — |
