@@ -170,7 +170,11 @@ Google Authenticator)** while keeping the Mongo `Admin` record as the profile
 (`signToken`), so the authorizer, protected handlers, and the resident flow
 are unchanged. The pool + app client are created manually in the AWS console
 (`docs/COGNITO_AWS_CONSOLE.md`) and referenced via
-`COGNITO_USER_POOL_ID` / `COGNITO_CLIENT_ID` env vars.
+`COGNITO_USER_POOL_ID` / `COGNITO_CLIENT_ID` env vars. The Lambda execution
+role's `cognito-idp` grants live in `serverless.yml`
+(`provider.iam.role.statements`), and when the app client carries a generated
+secret, `COGNITO_CLIENT_SECRET` must be declared in `provider.environment` too
+— `npm run verify:routes` asserts both.
 
 Flow:
 

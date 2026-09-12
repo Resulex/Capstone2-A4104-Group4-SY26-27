@@ -122,6 +122,7 @@ Set by the bootstrap; listed here so the pipeline can be reproduced by hand.
 | `TOTP_SECRET_ENCRYPTION_KEY` | `backend/.env` | legacy admin TOTP secret at rest |
 | `GOOGLE_CLIENT_SECRET` | `backend/.env` | resident Google SSO |
 | `OAUTH_STATE_SECRET` | `backend/.env` | optional; falls back to `JWT_SECRET` |
+| `COGNITO_CLIENT_SECRET` | `backend/.env` | `SECRET_HASH` for the Cognito challenge calls; only needed when the app client has a generated secret |
 
 **Variables**
 
@@ -133,6 +134,18 @@ Set by the bootstrap; listed here so the pipeline can be reproduced by hand.
 
 `COGNITO_OFFLINE` is hard-coded to `false` in the workflow — it is a local
 development escape hatch and must never reach a deployed environment.
+
+> The preflight step also asserts `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`
+> and `COGNITO_CLIENT_SECRET`, because `serverless.yml` resolves each with
+> `${env:X, ''}` — an unset value would ship an empty string and admin login
+> would only fail later, at runtime, with a 500 that names no cause.
+
+The Lambda execution role's `cognito-idp` grants live in
+`backend/serverless.yml` (`provider.iam.role.statements`), so they ship with the
+stack: an out-of-band console policy is not reproducible and does not survive a
+stack rebuild. `npm run verify:routes` fails the build when a Cognito action the
+gateway uses is not granted there, or when `COGNITO_CLIENT_SECRET` is missing
+from the provider environment block.
 
 ### Where the frontend's config actually lives
 

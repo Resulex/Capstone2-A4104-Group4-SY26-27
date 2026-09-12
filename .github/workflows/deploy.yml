@@ -56,6 +56,10 @@ jobs:
       OAUTH_STATE_SECRET: ${{ secrets.OAUTH_STATE_SECRET }}
       COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID }}
       COGNITO_CLIENT_ID: ${{ vars.COGNITO_CLIENT_ID }}
+      # Required when the app client has a generated secret: the Lambdas must be
+      # able to compute SECRET_HASH for the challenge calls. Missing here, the
+      # deploy would still succeed and admin login would break at runtime.
+      COGNITO_CLIENT_SECRET: ${{ secrets.COGNITO_CLIENT_SECRET }}
       COGNITO_REGION: ${{ vars.COGNITO_REGION }}
       GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
       GOOGLE_REDIRECT_URI: ${{ vars.GOOGLE_REDIRECT_URI }}
@@ -87,7 +91,11 @@ jobs:
         run: |
           set -euo pipefail
           missing=()
-          for name in AWS_DEPLOY_ROLE_ARN AWS_REGION STAGE API_BACKEND_URL APP_BASE_URL MONGODB_URI JWT_SECRET TOTP_SECRET_ENCRYPTION_KEY; do
+          # The COGNITO_* trio is listed because admin login is dead without it:
+          # serverless.yml resolves each with `${env:X, ''}`, so an unset value
+          # ships an empty string instead of failing the deploy, and the
+          # runtime answer is a 500 that says nothing about the cause.
+          for name in AWS_DEPLOY_ROLE_ARN AWS_REGION STAGE API_BACKEND_URL APP_BASE_URL MONGODB_URI JWT_SECRET TOTP_SECRET_ENCRYPTION_KEY COGNITO_USER_POOL_ID COGNITO_CLIENT_ID COGNITO_CLIENT_SECRET; do
             if [ -z "${!name:-}" ]; then missing+=("$name"); fi
           done
           if [ ${#missing[@]} -gt 0 ]; then
