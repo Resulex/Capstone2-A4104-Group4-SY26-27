@@ -81,9 +81,9 @@ Seeded test accounts (see `backend/src/scripts/seed-data.ts`):
 
 | Role          | Username   | Password       | Notes                                      |
 | ------------- | ---------- | -------------- | ------------------------------------------ |
-| SUPER_ADMIN   | `r.cruz`   | `admin1`       | Full access incl. User Management          |
-| OPERATIONS_CLERK | `m.reyes` | `admin1`    | Incidents & document queues                |
-| INFO_OFFICER  | `j.bautista` | `admin1`   | Announcements / content only               |
+| SUPER_ADMIN   | `r.cruz`   | `Admin123!`       | Full access incl. User Management          |
+| OPERATIONS_CLERK | `m.reyes` | `Admin123`    | Incidents & document queues                |
+| INFO_OFFICER  | `j.bautista` | `Admin123`   | Announcements / content only               |
 
 
 > **Note:** MFA is not pre-enrolled for seeded accounts. On first admin login
