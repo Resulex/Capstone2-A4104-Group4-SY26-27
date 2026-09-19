@@ -8,6 +8,7 @@ import Typography from "@mui/material/Typography";
 import Link from "next/link";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import { NotificationRecord } from "@/lib/admin";
+import { notificationHref } from "@/lib/notification-routes";
 import { notificationPriority } from "@/lib/resident";
 import { StatusChip } from "@/components/resident/StatusChip";
 import { useAccessibilityTheme } from "@/context/ThemeContext";
@@ -21,25 +22,13 @@ interface NotificationCardProps {
 }
 
 /**
- * Derive a deep-link route from a notification's `referenceUrlId` when the
- * prefix identifies the record type (e.g. `INC-…` → incident detail).
- */
-export function notificationReferenceHref(referenceUrlId?: string): string | null {
-  if (!referenceUrlId) return null;
-  const id = referenceUrlId;
-  if (/^(INC|incident)/i.test(id)) return `/incidents/${encodeURIComponent(id)}`;
-  if (/^(REQ|DOC|request|document)/i.test(id)) {
-    return `/documents/${encodeURIComponent(id)}`;
-  }
-  return null;
-}
-
-/**
  * Reusable notification card: read toggle, priority badge (derived from the
  * backend category), title, message, and a deep link to the referenced record.
  */
 export function NotificationCard({ notification, onToggleRead }: NotificationCardProps) {
-  const href = notificationReferenceHref(notification.referenceUrlId);
+  // One shared resolver serves both portals, so a chat reply links to its
+  // thread here too instead of only incidents and documents linking out.
+  const href = notificationHref(notification, "resident");
   const read = Boolean(notification.isRead);
   const { highContrast } = useAccessibilityTheme();
 

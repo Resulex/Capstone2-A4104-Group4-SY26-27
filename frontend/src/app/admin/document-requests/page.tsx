@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
@@ -61,11 +61,30 @@ const DOCUMENT_STATUSES = [
 ] as const;
 
 /**
+ * Route entry point.
+ *
+ * The deep-link parameter below is read with `useSearchParams()`, which must sit
+ * inside a `<Suspense>` boundary or the static prerender of this route fails the
+ * production build ("useSearchParams() should be wrapped in a suspense
+ * boundary") — the trap `/admin/chat-sessions` already hit. The inner component
+ * owns every hook; this wrapper only supplies the boundary.
+ */
+export default function DocumentRequestsPage() {
+  return (
+    <Suspense fallback={null}>
+      <DocumentRequestsPageContent />
+    </Suspense>
+  );
+}
+
+/**
  * Admin Document Queue page — lists all document requests with applicant,
  * document type, purpose, status, request date, and remarks.
  */
-export default function DocumentRequestsPage() {
+function DocumentRequestsPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestParam = searchParams.get("request");
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
   const isOnline = useOnlineStatus();
 
@@ -190,6 +209,24 @@ export default function DocumentRequestsPage() {
       cancelled = true;
     };
   }, []);
+
+  /**
+   * Deep link from a notification (toast click-through or bell row): open the
+   * referenced request's history dialog, so the admin lands on the record itself
+   * rather than just the queue. The link carries the custom `REQ-…` id; the Mongo
+   * `_id` is accepted too, for notifications written before the ids settled.
+   */
+  const openedRequestParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!requestParam || isLoading) return;
+    if (openedRequestParamRef.current === requestParam) return;
+    const match = documents.find(
+      (doc) => doc.requestId === requestParam || doc._id === requestParam,
+    );
+    if (!match) return;
+    openedRequestParamRef.current = requestParam;
+    setHistoryDoc(match);
+  }, [requestParam, isLoading, documents]);
 
   if (isAuthLoading || !isAuthenticated || user?.role !== "admin") {
     return null;
