@@ -84,6 +84,7 @@ function ChatSessionsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const incidentParam = searchParams.get("incident");
+  const sessionParam = searchParams.get("session");
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
   const isOnline = useOnlineStatus();
   // Chat unread state lives in the shared admin notifications context, so the
@@ -114,6 +115,8 @@ function ChatSessionsPageContent() {
   const sessionsRef = useRef<ChatSessionRecord[]>([]);
   // Guards against duplicate auto-creation when arriving from an incident row.
   const creatingIncidentRef = useRef<string | null>(null);
+  // Guards against re-opening the same deep-linked session on every render.
+  const openedSessionParamRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isAuthLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -229,8 +232,29 @@ function ChatSessionsPageContent() {
   // store the incident's Mongo _id (not the custom INC-… id), so resolve the
   // incident's _id first. If the incident has no session yet, auto-create one
   // (responder-initiated triage) and open it.
+  //
+  // A notification click-through arrives with `?session=<id>` instead, where the
+  // id is the session's own `chat-…` id — or, for notifications written before
+  // that reference was standardised, the session's Mongo `_id` or the linked
+  // incident's `_id`. All three are matched below.
   useEffect(() => {
-    if (!incidentParam || isLoading) return;
+    if (isLoading) return;
+
+    if (sessionParam) {
+      if (openedSessionParamRef.current === sessionParam) return;
+      const match = sessions.find(
+        (session) =>
+          session.sessionId === sessionParam ||
+          session._id === sessionParam ||
+          String(session.incidentId) === sessionParam,
+      );
+      if (!match) return;
+      openedSessionParamRef.current = sessionParam;
+      selectSession(match);
+      return;
+    }
+
+    if (!incidentParam) return;
 
     const incident = incidents.find((i) => i.incidentId === incidentParam);
     const incidentKey = incident?._id ?? incidentParam;
@@ -280,7 +304,7 @@ function ChatSessionsPageContent() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions, incidents, isLoading, incidentParam]);
+  }, [sessions, incidents, isLoading, incidentParam, sessionParam]);
 
   const handleSend = async () => {
     const session = selectedSession;

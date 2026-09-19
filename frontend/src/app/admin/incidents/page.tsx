@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
@@ -118,11 +118,30 @@ function priorityColor(priority: string) {
 }
 
 /**
+ * Route entry point.
+ *
+ * The deep-link parameter below is read with `useSearchParams()`, which must sit
+ * inside a `<Suspense>` boundary or the static prerender of this route fails the
+ * production build ("useSearchParams() should be wrapped in a suspense
+ * boundary") — the trap `/admin/chat-sessions` already hit. The inner component
+ * owns every hook; this wrapper only supplies the boundary.
+ */
+export default function IncidentsPage() {
+  return (
+    <Suspense fallback={null}>
+      <IncidentsPageContent />
+    </Suspense>
+  );
+}
+
+/**
  * Admin Incident Reports page — lists all incident reports and lets an admin
  * update each report's triage priority and status in place.
  */
-export default function IncidentsPage() {
+function IncidentsPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const incidentParam = searchParams.get("incident");
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
   const isOnline = useOnlineStatus();
 
@@ -187,6 +206,26 @@ export default function IncidentsPage() {
       cancelled = true;
     };
   }, []);
+
+  /**
+   * Deep link from a notification (toast click-through or bell row): open the
+   * referenced report's history dialog, so the admin lands on the record itself
+   * rather than just the queue. The link carries the custom `INC-…` id; the Mongo
+   * `_id` is accepted too, for notifications written before the ids settled.
+   */
+  const openedIncidentParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!incidentParam || isLoading) return;
+    if (openedIncidentParamRef.current === incidentParam) return;
+    const match = incidents.find(
+      (incident) =>
+        incident.incidentId === incidentParam ||
+        incident._id === incidentParam,
+    );
+    if (!match) return;
+    openedIncidentParamRef.current = incidentParam;
+    setHistoryIncident(match);
+  }, [incidentParam, isLoading, incidents]);
 
   /** Opens the confirmation modal for a status change (never fires directly). */
   const openStatusModal = (incident: IncidentRecord, newStatus: string) => {

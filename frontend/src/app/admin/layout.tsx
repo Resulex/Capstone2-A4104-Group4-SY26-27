@@ -28,6 +28,8 @@ import {
 import { OnlineStatusProvider } from "@/context/OnlineStatusContext";
 import { useIdleSession } from "@/hooks/useIdleSession";
 import { useAdminProfile } from "@/hooks/useAdminProfile";
+import type { NotificationRecord } from "@/lib/admin";
+import { notificationHref } from "@/lib/notification-routes";
 import { clearLastActive } from "@/lib/session";
 import {
   ADMIN_DASHBOARD_PATH,
@@ -208,6 +210,7 @@ function useAdminLogout(): () => Promise<void> {
 }
 
 function AdminShell({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const pathname = usePathname();
   const { isAuthenticated, user } = useAuth();
   const { profile } = useAdminProfile();
@@ -235,6 +238,26 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   const unreadIncidentsCount = unreadIncidentIds.size;
   const unreadDocumentsCount = unreadDocumentIds.size;
   const unreadChatCount = unreadChatKeys.size;
+
+  /**
+   * Open the record a notification is about: mark that one notification read,
+   * then navigate to its page. Shared by the toast click-through and the bell
+   * rows so both behave identically.
+   */
+  const handleOpenNotification = useCallback(
+    (notification: NotificationRecord) => {
+      markNotificationRead(
+        notification.notificationId ?? notification._id ?? "",
+      );
+      const href = notificationHref(notification, "admin");
+      if (href) router.push(href);
+    },
+    [markNotificationRead, router],
+  );
+
+  // A destination exists for every category the backend writes, but keep the
+  // toast inert if one ever stops resolving.
+  const toastHref = toast ? notificationHref(toast, "admin") : null;
 
   // ---- Connection monitoring ---------------------------------------------
   const [browserOnline, setBrowserOnline] = useState<boolean>(
@@ -299,8 +322,8 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         pendingIncidents={dashboardData?.pendingIncidents ?? 0}
         notifications={notifications}
         unreadCount={unreadCount}
-        onMarkRead={markNotificationRead}
         onMarkAllRead={markAllRead}
+        onOpenNotification={handleOpenNotification}
         browserOnline={browserOnline}
         socketConnected={connectionStatus === "connected"}
         title={title}
@@ -327,13 +350,19 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         onSignOut={handleLogout}
       />
 
-      {/* Real-time notification toast (top-right): auto-closes after 10s, and
-          holds while the pointer or keyboard focus is on it. */}
+      {/* Real-time notification toast (top-right): shows a progress bar for its
+          10s display time, holds while the pointer or keyboard focus is on it,
+          and opens the referenced record when clicked. */}
       <NotificationToast
         notificationKey={toast?.notificationId ?? toast?._id ?? null}
         title={toast?.titleText}
         body={toast?.messageBody ?? ""}
         onClose={dismissToast}
+        onOpen={
+          toast && toastHref
+            ? () => handleOpenNotification(toast)
+            : undefined
+        }
         maxWidth={400}
       />
     </Box>

@@ -47,6 +47,11 @@ export interface TimelineEntry {
 
 /** A document request record for the queue page. */
 export interface DocumentQueueRecord {
+  /**
+   * Mongo id. The list endpoint returns the whole document, so this is present
+   * at runtime; it is also accepted when a notification deep-links here.
+   */
+  _id?: string;
   requestId: string;
   applicantDetails?: {
     fullName?: string;

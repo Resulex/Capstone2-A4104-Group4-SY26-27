@@ -22,6 +22,7 @@ import {
   fetchNotifications,
   playNotificationSound,
 } from "@/lib/admin";
+import { notificationHref } from "@/lib/notification-routes";
 import { countUnread, fetchResidentWsToken } from "@/lib/resident";
 import { clearLastActive } from "@/lib/session";
 
@@ -69,7 +70,7 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
   const isDashboard = pathname === "/";
   const { isAuthenticated, user, logout } = useAuth();
   const { profile, clearProfile } = useResident();
-  const { data, addNotificationLocal } = useResidentDashboard();
+  const { data, addNotificationLocal, markRecordsRead } = useResidentDashboard();
 
   const hasConsented = Boolean(user?.termsAcceptedAt);
   const isLegalPage = pathname === "/legal";
@@ -171,6 +172,21 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(timer);
   }, [isAuthenticated, user?.role, presentNotification]);
 
+  /**
+   * Open the record a notification is about: clear that record's unread state,
+   * then navigate to it. Backs the toast click-through.
+   */
+  const handleOpenNotification = useCallback(
+    (notification: NotificationRecord) => {
+      if (notification.referenceUrlId) {
+        markRecordsRead([notification.referenceUrlId]);
+      }
+      const href = notificationHref(notification, "resident");
+      if (href) router.push(href);
+    },
+    [markRecordsRead, router],
+  );
+
   // Red dot on the sidebar's Live Chat entry while unread chat replies exist.
   const unreadChatCount = data.notifications.filter(
     (n) => n.notificationCategory === "chatMessage" && !n.isRead,
@@ -248,13 +264,15 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
         onSignOut={handleLogout}
       />
 
-      {/* Real-time notification toast (top-right): auto-closes after 10s, and
-          holds while the pointer or keyboard focus is on it. */}
+      {/* Real-time notification toast (top-right): shows a progress bar for its
+          10s display time, holds while the pointer or keyboard focus is on it,
+          and opens the referenced record when clicked. */}
       <NotificationToast
         notificationKey={toast?.notificationId ?? toast?._id ?? null}
         title={toast?.titleText}
         body={toast?.messageBody ?? ""}
         onClose={() => setToast(null)}
+        onOpen={toast ? () => handleOpenNotification(toast) : undefined}
         maxWidth={420}
       />
     </Box>

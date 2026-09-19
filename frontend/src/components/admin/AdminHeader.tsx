@@ -37,10 +37,15 @@ interface AdminHeaderProps {
   notifications: NotificationRecord[];
   /** Count of unread notifications (badge, capped at 9+). */
   unreadCount: number;
-  /** Mark a single notification as read. */
-  onMarkRead: (id: string) => void;
   /** Mark all notifications as read. */
   onMarkAllRead: () => void;
+  /**
+   * Open the page for a notification's record. Opening also marks that one
+   * notification read (the shell handles both), so the bell row behaves like the
+   * toast. Marking read *without* navigating stays available on the notifications
+   * page and via "Read all" above.
+   */
+  onOpenNotification: (notification: NotificationRecord) => void;
   /** False when the device itself has lost its network connection. */
   browserOnline: boolean;
   /** True only while the notification WebSocket is open and healthy. */
@@ -62,8 +67,8 @@ export function AdminHeader({
   onOpenMobile,
   notifications,
   unreadCount,
-  onMarkRead,
   onMarkAllRead,
+  onOpenNotification,
   browserOnline,
   socketConnected,
   title,
@@ -181,7 +186,12 @@ export function AdminHeader({
                 {unread.map((n) => (
                   <ListItem key={n.notificationId} disablePadding>
                     <ListItemButton
-                      onClick={() => onMarkRead(n.notificationId)}
+                      onClick={() => {
+                        // Navigate to the record, not just mark it read — the
+                        // popover would otherwise swallow the click.
+                        handleCloseBell();
+                        onOpenNotification(n);
+                      }}
                       sx={{ borderRadius: 1, bgcolor: "action.hover" }}
                     >
                       <ListItemText
