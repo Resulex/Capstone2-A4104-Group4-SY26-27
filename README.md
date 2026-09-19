@@ -83,7 +83,7 @@ Seeded test accounts (see `backend/src/scripts/seed-data.ts`):
 | ------------- | ---------- | -------------- | ------------------------------------------ |
 | SUPER_ADMIN   | `ricardo.delacruz@kabarangayconnect.gov.ph`   | `Admin123!`       | Full access incl. User Management          |
 | OPERATIONS_CLERK | `maria.reyes@kabarangayconnect.gov.ph` | `Admin123!`    | Incidents & document queues                |
-| INFO_OFFICER  | `jose.bautista@kabarangayconnect.gov.ph` | `Admin123!`   | Announcements / content only               |
+| INFO_OFFICER  | `jose.bautista@kabarangayconnect.gov.ph | `Admin123!`   | Announcements / content only               |
 
 
 > **Note:** MFA is not pre-enrolled for seeded accounts. On first admin login
