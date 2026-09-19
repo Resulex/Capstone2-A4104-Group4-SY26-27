@@ -3,27 +3,24 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { notFoundError, badRequestError } from '../../../shared/errors';
-import { Message, ChatSession, Admin } from '../../../models';
-import { getAuthContext } from '../../../shared/authorization';
+import { Message, ChatSession } from '../../../models';
+import {
+  getAuthContext,
+  canReadSessionMessages,
+  type AuthContext,
+} from '../../../shared/authorization';
 
 /**
- * Verifies the caller is a participant of the message's session.
+ * Verifies the caller may read the message's session: residents only their own
+ * sessions, admins/officials the whole shared queue (`canReadSessionMessages`).
  * Throws 404 (not found) for non-participants to avoid data leakage.
  */
-async function assertMessageParticipant(
-  auth: { role: string; userId: string },
-  session: { residentId: unknown; adminId: unknown }
-): Promise<void> {
-  if (auth.role === 'resident') {
-    if (auth.userId !== String(session.residentId)) {
-      throw notFoundError('Message not found.');
-    }
-  } else if (auth.role === 'admin') {
-    const admin = await Admin.findOne({ adminId: auth.userId });
-    const adminId = admin ? admin._id : auth.userId;
-    if (String(adminId) !== String(session.adminId)) {
-      throw notFoundError('Message not found.');
-    }
+function assertMessageParticipant(
+  auth: AuthContext,
+  session: { residentId: unknown }
+): void {
+  if (!canReadSessionMessages(auth, session)) {
+    throw notFoundError('Message not found.');
   }
 }
 
@@ -53,7 +50,7 @@ export async function getMessage(
     throw badRequestError('Message session not found.');
   }
 
-  await assertMessageParticipant(auth, session);
+  assertMessageParticipant(auth, session);
   return ok(message.toObject(), 'Message fetched.');
 }
 
