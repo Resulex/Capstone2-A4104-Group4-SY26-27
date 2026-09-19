@@ -15,6 +15,8 @@ import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
 import { DocumentQueueRecord } from "@/lib/admin";
 import { formatDisplayDate } from "@/lib/resident";
 import { StatusChip } from "@/components/resident/StatusChip";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getUnreadCardSx } from "@/theme/theme";
 
 interface DocumentRequestCardProps {
   /** The document request to display. */
@@ -40,14 +42,15 @@ export function DocumentRequestCard({
   isUnread = false,
   onToggleRead,
 }: DocumentRequestCardProps) {
+  const { highContrast } = useAccessibilityTheme();
+
   return (
     <Card
       variant="outlined"
       sx={{
-        position: "relative",
         borderRadius: 3,
-        // Unread records get the same tint the notification centre uses.
-        bgcolor: isUnread ? "primary.light" : undefined,
+        // Unread records get the shared unread wash + left accent bar.
+        ...getUnreadCardSx(isUnread, highContrast),
       }}
     >
       <CardActionArea

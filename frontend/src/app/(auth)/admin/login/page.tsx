@@ -6,6 +6,7 @@ import Link from "next/link";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
@@ -75,6 +76,12 @@ interface SetupData {
 
 interface VerifyData {
   setupComplete?: boolean;
+  /**
+   * Session JWT — enrollment doubles as login, so the enroll step never asks
+   * for a second authenticator code. Absent only on an older backend.
+   */
+  token?: string;
+  user?: { assignedRole?: string };
 }
 
 export default function AdminLoginPage() {
@@ -96,6 +103,14 @@ export default function AdminLoginPage() {
   const [codeError, setCodeError] = useState(false);
   const [otpauthUrl, setOtpauthUrl] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
+  /**
+   * Set when /totp/verify hands back a session token: the enrollment success
+   * state shows for a beat, then the session is adopted (auto-login).
+   */
+  const [pendingLogin, setPendingLogin] = useState<{
+    token: string;
+    assignedRole?: string;
+  } | null>(null);
   /** Refocuses the first code box after a rejected attempt. */
   const codeInputRef = useRef<CodeInputHandle>(null);
 
@@ -346,8 +361,10 @@ export default function AdminLoginPage() {
     };
   }, [step, session, otpauthUrl, username]);
 
-  // Step 4b — verify the new authenticator, then re-submit credentials so the
-  // now-enabled MFA returns a real code challenge (step 3) to finish login.
+  // Step 4b — register the new authenticator. Success signs the admin in
+  // directly (the backend issues the session JWT), so there is NO second code
+  // prompt. The re-login path below is only a fallback for a response without
+  // a token (e.g. an older deployed backend).
   const handleSetupCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
@@ -360,12 +377,46 @@ export default function AdminLoginPage() {
 
     setSubmitting(true);
     try {
-      await fetchJson<{ data?: VerifyData }>("/api/auth/admin/login/totp/verify", {
-        method: "POST",
-        body: JSON.stringify({ userName: username.trim(), session, code }),
-      });
+      const verifyBody = await fetchJson<{ data?: VerifyData }>(
+        "/api/auth/admin/login/totp/verify",
+        {
+          method: "POST",
+          body: JSON.stringify({ userName: username.trim(), session, code }),
+        },
+      );
+      const verifyData = verifyBody.data;
 
-      // MFA is now enabled → sign in again to obtain the real challenge.
+      if (verifyData?.token) {
+        // Auto-login: show the success state, then adopt the session and land
+        // on the role's home.
+        setCode("");
+        setSecret(null);
+        setPendingLogin({
+          token: verifyData.token,
+          assignedRole: verifyData.user?.assignedRole,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        try {
+          await finishLogin(
+            verifyData.token,
+            verifyData.user?.assignedRole,
+          );
+        } catch {
+          // The authenticator IS registered — only the session hand-off
+          // failed. Drop back to credentials (which now asks for a normal
+          // 6-digit code) instead of stranding the admin on a dead success
+          // screen, and say so plainly rather than echoing the raw error.
+          setPendingLogin(null);
+          setStep(0);
+          setError(
+            "Authenticator registered, but signing you in failed. Please sign in again.",
+          );
+        }
+        return;
+      }
+
+      // Fallback — MFA is now enabled, so sign in again to obtain the real
+      // challenge and finish with a fresh code.
       const body = await fetchJson<{ data?: LoginData }>(
         "/api/auth/admin/login",
         {
@@ -419,6 +470,7 @@ export default function AdminLoginPage() {
     setCodeError(false);;
     setOtpauthUrl(null);
     setSecret(null);
+    setPendingLogin(null);
     setNewPassword("");
     setConfirmPassword("");
   };
@@ -430,6 +482,12 @@ export default function AdminLoginPage() {
         p: { xs: 3, sm: 5 },
         borderRadius: 3,
         bgcolor: getAuthCardSurface(highContrast),
+        // MUI outlined inputs are transparent by default, so on the tinted
+        // auth card the fields blended into the card. Put them back on the
+        // paper surface so every credential field reads as its own white box.
+        "& .MuiOutlinedInput-root": {
+          backgroundColor: (theme) => theme.palette.background.paper,
+        },
       }}
     >
       <Stack spacing={3}>
@@ -636,6 +694,16 @@ export default function AdminLoginPage() {
           </Box>
         ) : step === 3 ? (
           /* Step 4 — Authenticator Setup (first login / QR enrollment) */
+          pendingLogin ? (
+            /* Enrollment succeeded and the backend signed us in — a beat of
+               feedback, then the redirect to the role's landing page. */
+            <Stack spacing={2} alignItems="center">
+              <Alert severity="success" sx={{ width: "100%" }}>
+                Authenticator registered. Signing you in…
+              </Alert>
+              <CircularProgress size={28} aria-label="Signing in" />
+            </Stack>
+          ) : (
           <Box component="form" onSubmit={handleSetupCodeSubmit} noValidate>
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
@@ -702,6 +770,7 @@ export default function AdminLoginPage() {
               </Button>
             </Stack>
           </Box>
+          )
         ) : null}
 
         <Divider />

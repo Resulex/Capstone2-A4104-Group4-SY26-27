@@ -14,7 +14,9 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { useAuth } from "@/context/AuthContext";
+import { ContactNumberField } from "@/components/shared/ContactNumberField";
 import { fetchResident, ResidentRecord, updateResident } from "@/lib/admin";
+import { contactNumberError, normalizeContactNumber } from "@/lib/phone";
 
 /**
  * Admin — Edit Resident.
@@ -71,7 +73,7 @@ export default function EditResidentPage() {
           middleName: data.middleName ?? "",
           suffix: data.suffix ?? "",
           emailAddress: data.emailAddress ?? "",
-          contactNumber: data.contactNumber ?? "",
+          contactNumber: normalizeContactNumber(data.contactNumber ?? ""),
           houseUnitNumber: data.houseUnitNumber ?? "",
           streetPurokName: data.streetPurokName ?? "",
           city: data.city ?? "",
@@ -102,6 +104,14 @@ export default function EditResidentPage() {
   };
 
   const handleSave = async () => {
+    const contactProblem = contactNumberError(form.contactNumber, {
+      required: true,
+    });
+    if (contactProblem) {
+      setError(contactProblem);
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
@@ -111,7 +121,7 @@ export default function EditResidentPage() {
         middleName: form.middleName,
         suffix: form.suffix,
         emailAddress: form.emailAddress,
-        contactNumber: form.contactNumber,
+        contactNumber: normalizeContactNumber(form.contactNumber),
         houseUnitNumber: form.houseUnitNumber,
         streetPurokName: form.streetPurokName,
       });
@@ -208,11 +218,12 @@ export default function EditResidentPage() {
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField
-                  label="Contact Number"
+                <ContactNumberField
                   value={form.contactNumber}
-                  onChange={setField("contactNumber")}
-                  fullWidth
+                  onChange={(next) =>
+                    setForm((prev) => ({ ...prev, contactNumber: next }))
+                  }
+                  required
                 />
               </Grid>
               <Grid item xs={12} sm={6}>

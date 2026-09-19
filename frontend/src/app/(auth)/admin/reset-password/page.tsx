@@ -64,6 +64,9 @@ function AdminResetPasswordPageContent() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  // The confirm field keeps its OWN toggle (matching admin Settings): the two
+  // are compared by eye, so revealing one must not reveal the other.
+  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -186,7 +189,7 @@ function AdminResetPasswordPageContent() {
 
               <TextField
                 label="Confirm Password"
-                type={showPassword ? "text" : "password"}
+                type={showConfirm ? "text" : "password"}
                 autoComplete="new-password"
                 fullWidth
                 required
@@ -195,6 +198,23 @@ function AdminResetPasswordPageContent() {
                 error={passwordsMismatch}
                 helperText={passwordsMismatch ? "The two passwords do not match." : " "}
                 inputProps={{ "aria-label": "Confirm new password" }}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        aria-label={
+                          showConfirm
+                            ? "Hide password confirmation"
+                            : "Show password confirmation"
+                        }
+                        onClick={() => setShowConfirm((v) => !v)}
+                        edge="end"
+                      >
+                        {showConfirm ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
               />
 
               <Button

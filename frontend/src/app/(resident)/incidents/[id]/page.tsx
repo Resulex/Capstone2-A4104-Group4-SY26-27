@@ -22,7 +22,6 @@ import { TimelineSteps } from "@/components/shared/TimelineSteps";
 import { IncidentRecord } from "@/lib/admin";
 import { fetchIncidentReport, formatDateTime } from "@/lib/resident";
 import { isImageUrl, isVideoUrl, fileNameOf } from "@/lib/uploads";
-import { useResidentDashboard } from "@/context/ResidentDashboardContext";
 
 /**
  * Incident Report Details (`/incidents/{id}`).
@@ -33,7 +32,6 @@ import { useResidentDashboard } from "@/context/ResidentDashboardContext";
  */
 export default function IncidentDetailsPage() {
   const params = useParams<{ id: string }>();
-  const { unreadIncidentIds, markRecordsRead } = useResidentDashboard();
   const id = params.id;
 
   const [report, setReport] = useState<IncidentRecord | null>(null);
@@ -50,13 +48,6 @@ export default function IncidentDetailsPage() {
       cancelled = true;
     };
   }, [id]);
-
-  // Opening the report is what marks it seen — the resident is looking at it.
-  // Re-runs if a fresh update lands while the page is open, since the shell's
-  // push/poll changes `unreadIncidentIds`.
-  useEffect(() => {
-    if (unreadIncidentIds.has(id)) markRecordsRead([id]);
-  }, [id, unreadIncidentIds, markRecordsRead]);
 
   return (
     <Box sx={{ maxWidth: 860, mx: "auto" }}>

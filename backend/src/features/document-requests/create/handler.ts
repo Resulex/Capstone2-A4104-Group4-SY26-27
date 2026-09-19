@@ -3,6 +3,7 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody } from '../../../shared/handler';
 import { created, badRequest } from '../../../shared/responses';
 import { badRequestError } from '../../../shared/errors';
+import { contactNumberViolation, normalizeContactNumber } from '../../../shared/contact-number';
 import { DocumentRequest, Resident } from '../../../models';
 import {
   getAuthContext,
@@ -50,6 +51,13 @@ export async function createDocumentRequest(
     );
   }
 
+  // The contact number is optional here (it falls back to the resident's stored
+  // value), but a supplied one must still be digits only and within the cap.
+  const contactProblem = contactNumberViolation(body.contactNumber);
+  if (contactProblem) {
+    return badRequest(contactProblem);
+  }
+
   // Defense-in-depth: residents can only create requests for themselves.
   assertOwnResidentRef(auth, effectiveResidentId);
 
@@ -78,8 +86,11 @@ export async function createDocumentRequest(
         .join(' '),
       // Prefer the contact details captured on the request form; fall back to
       // the resident's stored values (or empty strings when unknown) instead
-      // of failing the schema's required check.
-      contactNumber: body.contactNumber?.trim() || resident.contactNumber || '',
+      // of failing the schema's required check. Both paths are normalized so
+      // the snapshot is digits-only even for older `+63…` records.
+      contactNumber:
+        normalizeContactNumber(body.contactNumber ?? '') ||
+        normalizeContactNumber(resident.contactNumber ?? ''),
       emailAddress:
         body.emailAddress?.trim().toLowerCase() || resident.emailAddress || '',
     },

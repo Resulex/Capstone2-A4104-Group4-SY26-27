@@ -10,6 +10,8 @@ import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import { NotificationRecord } from "@/lib/admin";
 import { notificationPriority } from "@/lib/resident";
 import { StatusChip } from "@/components/resident/StatusChip";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getUnreadCardSx } from "@/theme/theme";
 
 interface NotificationCardProps {
   /** The notification to display. */
@@ -39,13 +41,16 @@ export function notificationReferenceHref(referenceUrlId?: string): string | nul
 export function NotificationCard({ notification, onToggleRead }: NotificationCardProps) {
   const href = notificationReferenceHref(notification.referenceUrlId);
   const read = Boolean(notification.isRead);
+  const { highContrast } = useAccessibilityTheme();
 
   return (
     <Card
       variant="outlined"
       sx={{
         borderRadius: 3,
-        bgcolor: read ? "background.paper" : "primary.light",
+        // Unread notifications get the shared unread wash + left accent bar;
+        // read cards fall back to the default `background.paper`.
+        ...getUnreadCardSx(!read, highContrast),
         opacity: read ? 0.85 : 1,
         transition: "background-color 0.2s ease, opacity 0.2s ease",
       }}

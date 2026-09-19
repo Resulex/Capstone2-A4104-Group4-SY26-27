@@ -6,6 +6,10 @@ import { conflictError, badRequestError } from '../../../shared/errors';
 import { hashPassword } from '../../../shared/password';
 import { Resident, Barangay } from '../../../models';
 import { getAuthContext, requireStaffOrAdmin } from '../../../shared/authorization';
+import {
+  contactNumberViolation,
+  normalizeContactNumber,
+} from '../../../shared/contact-number';
 
 interface CreateResidentBody {
   residentId?: string;
@@ -64,6 +68,11 @@ export async function createResident(
     );
   }
 
+  const contactProblem = contactNumberViolation(contactNumber, { required: true });
+  if (contactProblem) {
+    return badRequest(contactProblem);
+  }
+
   await connectToDatabase();
 
   const existing = await Resident.findOne({
@@ -87,7 +96,7 @@ export async function createResident(
     middleName: body.middleName || undefined,
     suffix: body.suffix || undefined,
     emailAddress: emailAddress.toLowerCase(),
-    contactNumber,
+    contactNumber: normalizeContactNumber(contactNumber),
     houseUnitNumber,
     streetPurokName,
     barangay: barangay._id,

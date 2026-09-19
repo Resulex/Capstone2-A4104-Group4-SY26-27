@@ -17,7 +17,6 @@ import { StatusChip } from "@/components/resident/StatusChip";
 import { EmptyState } from "@/components/resident/EmptyState";
 import { LoadingSkeleton } from "@/components/resident/LoadingSkeleton";
 import { useResident } from "@/context/ResidentContext";
-import { useResidentDashboard } from "@/context/ResidentDashboardContext";
 import {
   DocumentRequestDetail,
   fetchDocumentRequest,
@@ -35,7 +34,6 @@ import { isImageUrl, fileNameOf } from "@/lib/uploads";
 export default function DocumentRequestDetailsPage() {
   const params = useParams<{ id: string }>();
   const { profile } = useResident();
-  const { unreadDocumentIds, markRecordsRead } = useResidentDashboard();
   const id = params.id;
 
   const [request, setRequest] = useState<DocumentRequestDetail | null>(null);
@@ -53,13 +51,6 @@ export default function DocumentRequestDetailsPage() {
       cancelled = true;
     };
   }, [id]);
-
-  // Opening the request is what marks it seen — the resident is looking at it.
-  // Re-runs if a fresh update lands while the page is open, since the shell's
-  // push/poll changes `unreadDocumentIds`.
-  useEffect(() => {
-    if (unreadDocumentIds.has(id)) markRecordsRead([id]);
-  }, [id, unreadDocumentIds, markRecordsRead]);
 
   // Resolve the barangay ObjectId on the profile to its display name so the
   // address shows the barangay name instead of a raw database id.

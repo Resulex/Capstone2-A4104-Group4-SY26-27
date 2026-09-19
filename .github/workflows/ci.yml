@@ -71,6 +71,10 @@ jobs:
       # localhost.
       API_BACKEND_URL: ${{ vars.API_BACKEND_URL || 'http://localhost:3000' }}
       API_BACKEND_STAGE: ${{ vars.STAGE || 'dev' }}
+      # Same reasoning: inlined into the browser bundle by Next, so mirroring the
+      # Amplify value here keeps the build honest (next.config.ts warns when it
+      # is missing in a production build).
+      NEXT_PUBLIC_WEBSOCKET_URL: ${{ vars.NEXT_PUBLIC_WEBSOCKET_URL }}
     steps:
       - name: Check out
         uses: actions/checkout@v4

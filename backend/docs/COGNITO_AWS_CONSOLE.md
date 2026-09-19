@@ -199,7 +199,8 @@ npm run deploy        # or: npx serverless deploy
   then continues with the QR enrollment below.
 - **First login (enrollment):** sign in at `/admin/login` → password step →
   you are prompted with a **QR code** → scan it with Google Authenticator (or
-  Authy) → enter the 6-digit code → sign in again with a code → dashboard.
+  Authy) → enter the 6-digit code → the admin is signed in automatically (one
+  code only — enrollment doubles as login).
 - **Subsequent logins:** email + password → 6-digit code → dashboard.
 - **Wrong code** → `401 Invalid or expired verification code`.
 - **Offline (no AWS):** set `COGNITO_OFFLINE=true` in `.env` and the backend

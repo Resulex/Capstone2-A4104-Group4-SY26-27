@@ -37,10 +37,7 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import ForumIcon from "@mui/icons-material/Forum";
 import HistoryIcon from "@mui/icons-material/History";
 import ImageIcon from "@mui/icons-material/Image";
-import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
-import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
 import { useAuth } from "@/context/AuthContext";
-import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { TimelineSteps } from "@/components/shared/TimelineSteps";
 import {
@@ -129,12 +126,6 @@ export default function IncidentsPage() {
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
   const isOnline = useOnlineStatus();
 
-  // Unread rows come from this admin's own notifications, shared with the sidebar
-  // badge — so the number and the bold rows can never disagree.
-  const { unreadIncidentIds, markRecordsRead, markRecordsUnread } =
-    useAdminNotifications();
-  const unreadInQueue = unreadIncidentIds.size;
-
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
   const [reporterNames, setReporterNames] = useState<Map<string, string>>(
     new Map(),
@@ -145,8 +136,6 @@ export default function IncidentsPage() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  /** When true the table shows only records this admin has not seen yet. */
-  const [unreadOnly, setUnreadOnly] = useState(false);
   /** Pending status change awaiting confirmation in the modal. */
   const [statusModal, setStatusModal] = useState<{
     incident: IncidentRecord;
@@ -202,8 +191,6 @@ export default function IncidentsPage() {
   /** Opens the confirmation modal for a status change (never fires directly). */
   const openStatusModal = (incident: IncidentRecord, newStatus: string) => {
     if (newStatus === incident.incidentStatus) return;
-    // Acting on a record means the admin has seen it.
-    markRecordsRead([incident.incidentId]);
     setRemarksDraft("");
     setRemarksError(null);
     setDuplicateDraft(null);
@@ -219,16 +206,6 @@ export default function IncidentsPage() {
     setRemarksError(null);
     setDuplicateDraft(null);
     setDuplicateError(null);
-  };
-
-  /** True while this admin still has unread notifications about the report. */
-  const isUnread = (incident: IncidentRecord) =>
-    unreadIncidentIds.has(incident.incidentId);
-
-  /** Opening the status history counts as having seen the report. */
-  const openHistory = (incident: IncidentRecord) => {
-    markRecordsRead([incident.incidentId]);
-    setHistoryIncident(incident);
   };
 
   const confirmStatusChange = async () => {
@@ -291,13 +268,8 @@ export default function IncidentsPage() {
       ? incidents
       : incidents.filter((i) => i.incidentStatus === statusFilter)
   )
-    .filter((i) => !unreadOnly || unreadIncidentIds.has(i.incidentId))
     .slice()
     .sort(compareIncidents);
-
-  /** Mark every row currently on screen as read (respects the active filters). */
-  const markAllVisibleRead = () =>
-    markRecordsRead(filteredIncidents.map((i) => i.incidentId));
 
   // Candidate originals for the duplicate picker: every other report, drawn
   // from the FULL list so a status filter never hides a valid choice.
@@ -353,48 +325,25 @@ export default function IncidentsPage() {
               </Typography>
             </Stack>
 
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Button
-                size="small"
-                variant={unreadOnly ? "contained" : "outlined"}
-                color={unreadOnly ? "primary" : "inherit"}
-                startIcon={<MarkEmailUnreadIcon />}
-                aria-pressed={unreadOnly}
-                onClick={() => setUnreadOnly((prev) => !prev)}
-                sx={{ whiteSpace: "nowrap" }}
+            <FormControl size="small" sx={{ minWidth: 180 }}>
+              <InputLabel id="incident-status-filter-label">Filter</InputLabel>
+              <Select
+                labelId="incident-status-filter-label"
+                id="incident-status-filter"
+                value={statusFilter}
+                label="Filter"
+                onChange={(event: SelectChangeEvent) =>
+                  setStatusFilter(event.target.value)
+                }
               >
-                Unread only{unreadInQueue > 0 ? ` (${unreadInQueue})` : ""}
-              </Button>
-              <Button
-                size="small"
-                variant="text"
-                startIcon={<MarkEmailReadIcon />}
-                disabled={unreadInQueue === 0}
-                onClick={markAllVisibleRead}
-                sx={{ whiteSpace: "nowrap" }}
-              >
-                Mark all as read
-              </Button>
-              <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel id="incident-status-filter-label">Filter</InputLabel>
-                <Select
-                  labelId="incident-status-filter-label"
-                  id="incident-status-filter"
-                  value={statusFilter}
-                  label="Filter"
-                  onChange={(event: SelectChangeEvent) =>
-                    setStatusFilter(event.target.value)
-                  }
-                >
-                  <MenuItem value="all">All Statuses</MenuItem>
-                  {INCIDENT_STATUSES.map((status) => (
-                    <MenuItem key={status} value={status}>
-                      {status}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Stack>
+                <MenuItem value="all">All Statuses</MenuItem>
+                {INCIDENT_STATUSES.map((status) => (
+                  <MenuItem key={status} value={status}>
+                    {status}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Stack>
 
           {isLoading ? (
@@ -410,9 +359,7 @@ export default function IncidentsPage() {
             </Box>
           ) : filteredIncidents.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              {unreadOnly
-                ? "No unread incident reports match these filters."
-                : "No incident reports found."}
+              No incident reports found.
             </Typography>
           ) : (
             <TableContainer>
@@ -445,11 +392,11 @@ export default function IncidentsPage() {
                         },
                       })}
                     >
-                      <TableCell sx={{ fontWeight: isUnread(incident) ? 700 : 400 }}>
+                      <TableCell sx={{ fontWeight: 600 }}>
                         {incident.incidentId}
                       </TableCell>
                       <TableCell>{incident.incidentCategory}</TableCell>
-                      <TableCell sx={{ fontWeight: isUnread(incident) ? 700 : 400 }}>
+                      <TableCell>
                         {reporterNames.get(incident.residentId) ?? "Unknown"}
                       </TableCell>
                       <TableCell>
@@ -536,38 +483,11 @@ export default function IncidentsPage() {
                       </TableCell>
                       <TableCell>
                         <Stack direction="row" spacing={1} alignItems="center">
-                          <Tooltip
-                            title={
-                              isUnread(incident)
-                                ? "Mark as read"
-                                : "Mark as unread"
-                            }
-                          >
-                            <IconButton
-                              size="small"
-                              aria-label={
-                                isUnread(incident)
-                                  ? `Mark ${incident.incidentId} as read`
-                                  : `Mark ${incident.incidentId} as unread`
-                              }
-                              onClick={() =>
-                                isUnread(incident)
-                                  ? markRecordsRead([incident.incidentId])
-                                  : markRecordsUnread([incident.incidentId])
-                              }
-                            >
-                              {isUnread(incident) ? (
-                                <MarkEmailReadIcon fontSize="small" />
-                              ) : (
-                                <MarkEmailUnreadIcon fontSize="small" />
-                              )}
-                            </IconButton>
-                          </Tooltip>
                           <Tooltip title="View status history">
                             <IconButton
                               size="small"
                               aria-label={`View status history for ${incident.incidentId}`}
-                              onClick={() => openHistory(incident)}
+                              onClick={() => setHistoryIncident(incident)}
                             >
                               <HistoryIcon fontSize="small" />
                             </IconButton>

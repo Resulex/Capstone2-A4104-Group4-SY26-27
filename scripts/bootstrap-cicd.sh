@@ -57,6 +57,18 @@ STAGE="${STAGE:-dev}"
 AMPLIFY_APP_NAME="${AMPLIFY_APP_NAME:-Capstone2-A4104-Group4-SY26-27}"
 AMPLIFY_BRANCH_NAME="${AMPLIFY_BRANCH_NAME:-main}"
 API_BACKEND_URL="${API_BACKEND_URL:-https://5p91o0g2ea.execute-api.ap-southeast-1.amazonaws.com}"
+# Real-time notification push. This is the wss:// URL of the API Gateway
+# WebSocket API that the `ws-*` events in backend/serverless.yml create; the
+# api-id is random, so there is no way to derive it — override with
+# WEBSOCKET_ENDPOINT=... if the API is ever recreated.
+#
+# Deliberately NOT read from backend/.env: that file carries the LOOPBACK value
+# (http://localhost:3001) used by `serverless offline`, and src/shared/ws.ts
+# refuses a loopback endpoint in a deployed Lambda — so publishing it here could
+# only ever produce silent no-op pushes.
+WEBSOCKET_ENDPOINT="${WEBSOCKET_ENDPOINT:-wss://4ogxcelo9l.execute-api.ap-southeast-1.amazonaws.com/dev}"
+# Baked into the browser bundle by Next at build time (src/hooks/useWebSocket.ts).
+NEXT_PUBLIC_WEBSOCKET_URL="${NEXT_PUBLIC_WEBSOCKET_URL:-${WEBSOCKET_ENDPOINT}}"
 # Serverless provisions its deployment bucket and Lambda execution role under
 # this prefix (service name `kabarangayconnect-backend`).
 SERVERLESS_BUCKET_PREFIX="${SERVERLESS_BUCKET_PREFIX:-kabarangayconnect-backend-}"
@@ -293,7 +305,7 @@ else
     --platform WEB_COMPUTE \
     --access-token "${GITHUB_PAT}" \
     --no-enable-branch-auto-build \
-    --environment-variables "API_BACKEND_URL=${API_BACKEND_URL},API_BACKEND_STAGE=${STAGE}" \
+    --environment-variables "API_BACKEND_URL=${API_BACKEND_URL},API_BACKEND_STAGE=${STAGE},NEXT_PUBLIC_WEBSOCKET_URL=${NEXT_PUBLIC_WEBSOCKET_URL}" \
     --query 'app.appId' --output text)"
   ok "created app: ${APP_ID}"
 fi
@@ -306,7 +318,7 @@ else
   ok "platform: WEB_COMPUTE"
 fi
 
-BRANCH_ENV="API_BACKEND_URL=${API_BACKEND_URL},API_BACKEND_STAGE=${STAGE},SESSION_COOKIE_MAX_AGE_SECONDS=${SESSION_COOKIE_MAX_AGE_SECONDS},COOKIE_SECURE=true"
+BRANCH_ENV="API_BACKEND_URL=${API_BACKEND_URL},API_BACKEND_STAGE=${STAGE},SESSION_COOKIE_MAX_AGE_SECONDS=${SESSION_COOKIE_MAX_AGE_SECONDS},COOKIE_SECURE=true,NEXT_PUBLIC_WEBSOCKET_URL=${NEXT_PUBLIC_WEBSOCKET_URL}"
 if aws amplify get-branch --app-id "${APP_ID}" --branch-name "${AMPLIFY_BRANCH_NAME}" >/dev/null 2>&1; then
   aws amplify update-branch --app-id "${APP_ID}" --branch-name "${AMPLIFY_BRANCH_NAME}" \
     --stage PRODUCTION --no-enable-auto-build \
@@ -334,6 +346,8 @@ Add these to ${REPO_SLUG} -> Settings -> Secrets and variables -> Actions:
   Variable  API_BACKEND_URL     = ${API_BACKEND_URL}
   Variable  AMPLIFY_APP_ID      = ${APP_ID}
   Variable  AMPLIFY_BRANCH_NAME = ${AMPLIFY_BRANCH_NAME}
+  Variable  WEBSOCKET_ENDPOINT  = ${WEBSOCKET_ENDPOINT}
+  Variable  NEXT_PUBLIC_WEBSOCKET_URL = ${NEXT_PUBLIC_WEBSOCKET_URL}
 
 Plus MONGODB_URI, JWT_SECRET, TOTP_SECRET_ENCRYPTION_KEY, GOOGLE_CLIENT_SECRET
 (and the COGNITO_*/GOOGLE_*/S3_*/TOTP_* variables listed in docs/CICD.md).
@@ -383,6 +397,12 @@ set_variable API_BACKEND_URL                "${API_BACKEND_URL}"
 set_variable AMPLIFY_APP_ID                 "${APP_ID}"
 set_variable AMPLIFY_BRANCH_NAME            "${AMPLIFY_BRANCH_NAME}"
 set_variable SESSION_COOKIE_MAX_AGE_SECONDS "${SESSION_COOKIE_MAX_AGE_SECONDS}"
+# Real-time push. Deliberately NOT via env_value: backend/.env holds the loopback
+# value for `serverless offline`, and re-running this script re-pushes every
+# variable — so sourcing these from .env would silently overwrite the deployed
+# endpoint with localhost on every bootstrap.
+set_variable WEBSOCKET_ENDPOINT          "${WEBSOCKET_ENDPOINT}"
+set_variable NEXT_PUBLIC_WEBSOCKET_URL   "${NEXT_PUBLIC_WEBSOCKET_URL}"
 
 for key in MONGODB_URI JWT_SECRET TOTP_SECRET_ENCRYPTION_KEY GOOGLE_CLIENT_SECRET OAUTH_STATE_SECRET COGNITO_CLIENT_SECRET; do
   set_secret "${key}" "$(env_value "${key}" || true)"

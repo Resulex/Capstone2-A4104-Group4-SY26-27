@@ -2,9 +2,13 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-l
 import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
-import { notFoundError } from '../../../shared/errors';
+import { notFoundError, badRequestError } from '../../../shared/errors';
 import { Official } from '../../../models';
 import { getAuthContext, requireStaffOrAdmin } from '../../../shared/authorization';
+import {
+  contactNumberViolation,
+  normalizeContactNumber,
+} from '../../../shared/contact-number';
 
 interface UpdateOfficialBody {
   fullName?: string;
@@ -41,7 +45,13 @@ export async function updateOfficial(
 
   if (body.fullName !== undefined) official.fullName = body.fullName;
   if (body.designatedPosition !== undefined) official.designatedPosition = body.designatedPosition;
-  if (body.contactNumber !== undefined) official.contactNumber = body.contactNumber;
+  if (body.contactNumber !== undefined) {
+    const contactProblem = contactNumberViolation(body.contactNumber);
+    if (contactProblem) {
+      throw badRequestError(contactProblem);
+    }
+    official.contactNumber = normalizeContactNumber(body.contactNumber);
+  }
   if (body.emailAddress !== undefined) official.emailAddress = body.emailAddress.toLowerCase();
   if (body.officeLocation !== undefined) official.officeLocation = body.officeLocation;
   if (body.coreResponsibilities !== undefined) official.coreResponsibilities = body.coreResponsibilities;

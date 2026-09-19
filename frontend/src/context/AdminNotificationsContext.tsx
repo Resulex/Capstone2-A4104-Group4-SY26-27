@@ -104,24 +104,28 @@ export function AdminNotificationsProvider({
 
   /**
    * Merge one server notification into state, deduped by id so a socket
-   * redelivery or a polling overlap cannot double-count. `live` items (pushed
-   * over the WebSocket) also raise the toast + chime; polled catch-up items are
-   * merged silently so a reconnect never replays old alerts.
+   * redelivery or a polling overlap cannot double-count.
+   *
+   * Every newly-seen notification is surfaced with a toast + chime, whether it
+   * arrived over the socket or was picked up by the polling fallback. An earlier
+   * version raised them only for socket-delivered items, so that "a reconnect
+   * never replays old alerts" — but the dedupe below (plus the seed fetch
+   * marking every pre-existing id as seen) already guarantees each notification
+   * is surfaced at most once per page load, so that protection was redundant.
+   * Its real effect was to make a dead push path undetectable: badges and bold
+   * rows still updated from the poll while members of staff waited for a toast
+   * and a chime that could never come. The resident shell has always presented
+   * polled items, which is why residents looked fine while admins did not.
    */
-  const mergeNotification = useCallback(
-    (incoming: NotificationRecord, live: boolean) => {
-      const key = incoming.notificationId ?? incoming._id ?? "";
-      // Dedupe (a reconnect or a poll can redeliver an event we already surfaced).
-      if (!key || seenNotifIdsRef.current.has(key)) return;
-      seenNotifIdsRef.current.add(key);
-      setNotifications((prev) => [incoming, ...prev]);
-      if (live) {
-        setToast(incoming);
-        playNotificationSound();
-      }
-    },
-    [],
-  );
+  const mergeNotification = useCallback((incoming: NotificationRecord) => {
+    const key = incoming.notificationId ?? incoming._id ?? "";
+    // Dedupe (a reconnect or a poll can redeliver an event we already surfaced).
+    if (!key || seenNotifIdsRef.current.has(key)) return;
+    seenNotifIdsRef.current.add(key);
+    setNotifications((prev) => [incoming, ...prev]);
+    setToast(incoming);
+    playNotificationSound();
+  }, []);
 
   const handleMessage = useCallback(
     (data: unknown) => {
@@ -130,7 +134,7 @@ export function AdminNotificationsProvider({
         notification?: NotificationRecord;
       };
       if (message?.type !== "notification" || !message.notification) return;
-      mergeNotification(message.notification, true);
+      mergeNotification(message.notification);
     },
     [mergeNotification],
   );
@@ -147,7 +151,9 @@ export function AdminNotificationsProvider({
    * relaxes while it is healthy but never stops — a push path that dies silently
    * (open socket, no messages) must still self-heal. A poll costs a full Lambda
    * invocation, so the relaxed interval matters in local dev. The shared dedupe
-   * keeps any overlap harmless.
+   * keeps any overlap harmless, and `mergeNotification` raises the same toast +
+   * chime as a pushed item so this fallback is never the silent path it used to
+   * be.
    */
   const pollIntervalMs = connectionStatus === "connected" ? 30_000 : 8_000;
 
@@ -156,7 +162,7 @@ export function AdminNotificationsProvider({
       // Skip until the seed fetch has replaced the list at least once.
       if (!seededNotifIdsRef.current) return;
       const fresh = await fetchMyNotifications();
-      for (const n of fresh) mergeNotification(n, false);
+      for (const n of fresh) mergeNotification(n);
     };
     const timer = window.setInterval(() => void tick(), pollIntervalMs);
     return () => window.clearInterval(timer);

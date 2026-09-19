@@ -1,6 +1,6 @@
 "use client";
 
-import { createTheme, Theme, ThemeOptions } from "@mui/material/styles";
+import { alpha, createTheme, SxProps, Theme, ThemeOptions } from "@mui/material/styles";
 
 /**
  * Typographic scaling options exposed by the accessibility theme context.
@@ -125,6 +125,73 @@ export function getTelemetryCardGradient(highContrast: boolean): string {
   return `linear-gradient(180deg, ${
     getShellColors(highContrast).header
   } 0%, #FFFFFF 100%)`;
+}
+
+/**
+ * How much civic primary is mixed with white to mark a record as unseen.
+ *
+ * A semi-transparent wash rather than a fixed hex, so the tint always tracks
+ * `primary.main`. Over the resident shell's `background.default` (`#F5F7FA`) it
+ * composites to `#E2EBF3`, which keeps dark text legible: `text.primary
+ * #1B2733` 12.6:1, `text.secondary #475569` 6.3:1 and the outlined
+ * `StatusChip` accent `primary.main #0B5FA5` 5.4:1 — all WCAG AA. The previous
+ * `primary.light` fill (`#4A8FC7`) put that same body text at 4.4:1, secondary
+ * text at 2.2:1 and the outlined status chips drawn on top of it at 1.9:1.
+ */
+const UNREAD_SURFACE_ALPHA = 0.08;
+
+/** Width of the unread card's left accent bar, in px. */
+const UNREAD_ACCENT_WIDTH = 4;
+
+/**
+ * Resolves the unread-record surface for the current accessibility mode: a
+ * light primary wash that dark text and the outlined status chips still read
+ * against.
+ *
+ * High-contrast mode resolves to plain white so the high-contrast palette stays
+ * the dominant, maximum-legibility treatment (same rule as `getShellColors` /
+ * `getAuthCardSurface` / `getTelemetryCardGradient`); the accent bar and the
+ * "New" chip carry the unread signal there instead.
+ */
+export function getUnreadSurface(highContrast: boolean): string {
+  return highContrast ? "#FFFFFF" : alpha(CIVIC_PRIMARY.main, UNREAD_SURFACE_ALPHA);
+}
+
+/**
+ * `sx` entries marking a card as unread: the light primary wash plus a primary
+ * left accent bar. Returns an empty object for read records, so callers can
+ * spread it into the `Card`'s `sx` unconditionally.
+ *
+ * The bar is a pseudo-element rather than a thicker `borderLeft` so unread and
+ * read cards keep identical content offsets within one grid row, and so it
+ * follows the card's rounded corners. It also gives the unread state a
+ * non-colour-only cue, and it is the surviving signal in high-contrast mode
+ * where the surface is white — hence `text.primary` (black) there, since the
+ * high-contrast primary is a yellow that would disappear against white.
+ */
+export function getUnreadCardSx(
+  isUnread: boolean,
+  highContrast: boolean,
+): SxProps<Theme> {
+  if (!isUnread) return {};
+
+  return {
+    position: "relative",
+    bgcolor: getUnreadSurface(highContrast),
+    "&::before": {
+      content: '""',
+      position: "absolute",
+      left: 0,
+      top: 0,
+      bottom: 0,
+      width: UNREAD_ACCENT_WIDTH,
+      borderTopLeftRadius: "inherit",
+      borderBottomLeftRadius: "inherit",
+      bgcolor: highContrast ? "text.primary" : "primary.main",
+      zIndex: 1,
+      pointerEvents: "none",
+    },
+  };
 }
 
 /**

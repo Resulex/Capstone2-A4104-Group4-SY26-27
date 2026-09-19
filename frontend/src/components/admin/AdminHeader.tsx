@@ -41,8 +41,10 @@ interface AdminHeaderProps {
   onMarkRead: (id: string) => void;
   /** Mark all notifications as read. */
   onMarkAllRead: () => void;
-  /** True when the browser is online AND the WebSocket is connected. */
-  online: boolean;
+  /** False when the device itself has lost its network connection. */
+  browserOnline: boolean;
+  /** True only while the notification WebSocket is open and healthy. */
+  socketConnected: boolean;
   /** Page title displayed in the app bar. */
   title: string;
 }
@@ -51,8 +53,8 @@ interface AdminHeaderProps {
  * Top app bar for the admin shell.
  *
  * Houses the drawer toggle (mobile menu / desktop collapse), the page title,
- * the accessibility controls, the WebSocket status warning, and a notification
- * bell badged with the pending-incident count.
+ * the accessibility controls, the notification-delivery status chip, and a
+ * notification bell badged with the pending-incident count.
  */
 export function AdminHeader({
   expanded,
@@ -62,7 +64,8 @@ export function AdminHeader({
   unreadCount,
   onMarkRead,
   onMarkAllRead,
-  online,
+  browserOnline,
+  socketConnected,
   title,
 }: AdminHeaderProps) {
   const { highContrast } = useAccessibilityTheme();
@@ -121,7 +124,10 @@ export function AdminHeader({
           <AccessibilityControls />
         </Box>
 
-        <WebSocketStatus isOnline={online} />
+        <WebSocketStatus
+          browserOnline={browserOnline}
+          socketConnected={socketConnected}
+        />
 
         <Tooltip title="Notifications">
           <IconButton

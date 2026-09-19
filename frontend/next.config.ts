@@ -31,9 +31,31 @@ if (process.env.NODE_ENV === "production" && !process.env.API_BACKEND_URL) {
  */
 const API_WEBSOCKET_URL = process.env.API_WEBSOCKET_URL ?? "ws://localhost:3001";
 
-// The browser bundle reads NEXT_PUBLIC_WEBSOCKET_URL directly (see
-// src/hooks/useWebSocket.ts); referenced here so both keys stay documented and
-// visible to the Next.js env loader.
+/**
+ * URL the browser actually dials. Read directly by
+ * `src/hooks/useWebSocket.ts`; only referenced here so it stays visible and so
+ * a production build can warn when it is missing.
+ */
+const NEXT_PUBLIC_WEBSOCKET_URL = process.env.NEXT_PUBLIC_WEBSOCKET_URL;
+
+// A production build without NEXT_PUBLIC_WEBSOCKET_URL inlines the
+// `ws://localhost:3001` fallback from `src/hooks/useWebSocket.ts`, so every
+// visitor's browser dials its OWN machine: the socket can never connect and the
+// console silently degrades to the polling fallback (late, and with no toast or
+// chime on the admin side for polled items). That is exactly what shipped on
+// Amplify and went unnoticed for weeks, because members of staff do not read
+// the browser console. Next inlines `NEXT_PUBLIC_*` at BUILD time, so this must
+// be set on the hosting platform before the build — not at request time.
+if (process.env.NODE_ENV === "production" && !NEXT_PUBLIC_WEBSOCKET_URL) {
+  console.warn(
+    "[next.config] NEXT_PUBLIC_WEBSOCKET_URL is not set — this build will make the " +
+      "browser dial ws://localhost:3001, so real-time notifications will never arrive " +
+      "(the UI falls back to 8s polling). Set it on the hosting platform before deploying.",
+  );
+}
+
+// Still referenced so the local/offline key stays documented next to the public
+// one it has to match (`custom.serverless-offline.websocketPort`).
 void API_WEBSOCKET_URL;
 
 const nextConfig: NextConfig = {

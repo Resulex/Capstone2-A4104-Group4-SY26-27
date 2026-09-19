@@ -2,8 +2,12 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-l
 import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
-import { notFoundError, conflictError } from '../../../shared/errors';
+import { notFoundError, conflictError, badRequestError } from '../../../shared/errors';
 import { hashPassword } from '../../../shared/password';
+import {
+  contactNumberViolation,
+  normalizeContactNumber,
+} from '../../../shared/contact-number';
 import { Resident, Barangay } from '../../../models';
 import { getAuthContext, assertResidentOwnership } from '../../../shared/authorization';
 
@@ -54,7 +58,13 @@ export async function updateResident(
   if (body.lastName !== undefined) resident.lastName = body.lastName;
   if (body.middleName !== undefined) resident.middleName = body.middleName;
   if (body.suffix !== undefined) resident.suffix = body.suffix;
-  if (body.contactNumber !== undefined) resident.contactNumber = body.contactNumber;
+  if (body.contactNumber !== undefined) {
+    const contactProblem = contactNumberViolation(body.contactNumber);
+    if (contactProblem) {
+      throw badRequestError(contactProblem);
+    }
+    resident.contactNumber = normalizeContactNumber(body.contactNumber);
+  }
   if (body.houseUnitNumber !== undefined) resident.houseUnitNumber = body.houseUnitNumber;
   if (body.streetPurokName !== undefined) resident.streetPurokName = body.streetPurokName;
   if (body.profileImageUrl !== undefined) resident.profileImageUrl = body.profileImageUrl;

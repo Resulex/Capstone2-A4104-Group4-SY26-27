@@ -14,6 +14,8 @@ import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
 import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
 import { IncidentRecord } from "@/lib/admin";
 import { StatusChip } from "@/components/resident/StatusChip";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getUnreadCardSx } from "@/theme/theme";
 
 interface IncidentCardProps {
   /** The incident report to display. */
@@ -39,14 +41,15 @@ export function IncidentCard({
   isUnread = false,
   onToggleRead,
 }: IncidentCardProps) {
+  const { highContrast } = useAccessibilityTheme();
+
   return (
     <Card
       variant="outlined"
       sx={{
-        position: "relative",
         borderRadius: 3,
-        // Unread records get the same tint the notification centre uses.
-        bgcolor: isUnread ? "primary.light" : undefined,
+        // Unread records get the shared unread wash + left accent bar.
+        ...getUnreadCardSx(isUnread, highContrast),
       }}
     >
       <CardActionArea

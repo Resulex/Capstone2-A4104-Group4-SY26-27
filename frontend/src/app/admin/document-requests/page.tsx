@@ -32,10 +32,7 @@ import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
 import DescriptionIcon from "@mui/icons-material/Description";
 import HistoryIcon from "@mui/icons-material/History";
-import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
-import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
 import { useAuth } from "@/context/AuthContext";
-import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { TimelineSteps } from "@/components/shared/TimelineSteps";
 import {
@@ -72,12 +69,6 @@ export default function DocumentRequestsPage() {
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
   const isOnline = useOnlineStatus();
 
-  // Unread rows come from this admin's own notifications, shared with the sidebar
-  // badge — so the number and the bold rows can never disagree.
-  const { unreadDocumentIds, markRecordsRead, markRecordsUnread } =
-    useAdminNotifications();
-  const unreadInQueue = unreadDocumentIds.size;
-
   const [documents, setDocuments] = useState<DocumentQueueRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,8 +76,6 @@ export default function DocumentRequestsPage() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  /** When true the table shows only records this admin has not seen yet. */
-  const [unreadOnly, setUnreadOnly] = useState(false);
   const [statusModal, setStatusModal] = useState<{
     doc: DocumentQueueRecord;
     newStatus: string;
@@ -106,8 +95,6 @@ export default function DocumentRequestsPage() {
 
   const openStatusModal = (doc: DocumentQueueRecord, newStatus: string) => {
     if (newStatus === doc.currentStatus) return;
-    // Acting on a record means the admin has seen it.
-    markRecordsRead([doc.requestId]);
     setRemarksDraft("");
     setRemarksError(null);
     setActionError(null);
@@ -208,25 +195,10 @@ export default function DocumentRequestsPage() {
     return null;
   }
 
-  const filteredDocuments = (
+  const filteredDocuments =
     statusFilter === "all"
       ? documents
-      : documents.filter((d) => d.currentStatus === statusFilter)
-  ).filter((d) => !unreadOnly || unreadDocumentIds.has(d.requestId));
-
-  /** True while this admin still has unread notifications about the request. */
-  const isUnread = (doc: DocumentQueueRecord) =>
-    unreadDocumentIds.has(doc.requestId);
-
-  /** Opening the processing history counts as having seen the request. */
-  const openHistory = (doc: DocumentQueueRecord) => {
-    markRecordsRead([doc.requestId]);
-    setHistoryDoc(doc);
-  };
-
-  /** Mark every row currently on screen as read (respects the active filters). */
-  const markAllVisibleRead = () =>
-    markRecordsRead(filteredDocuments.map((d) => d.requestId));
+      : documents.filter((d) => d.currentStatus === statusFilter);
 
   return (
     <Box>
@@ -259,48 +231,25 @@ export default function DocumentRequestsPage() {
               </Typography>
             </Stack>
 
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Button
-                size="small"
-                variant={unreadOnly ? "contained" : "outlined"}
-                color={unreadOnly ? "primary" : "inherit"}
-                startIcon={<MarkEmailUnreadIcon />}
-                aria-pressed={unreadOnly}
-                onClick={() => setUnreadOnly((prev) => !prev)}
-                sx={{ whiteSpace: "nowrap" }}
+            <FormControl size="small" sx={{ minWidth: 180 }}>
+              <InputLabel id="status-filter-label">Filter</InputLabel>
+              <Select
+                labelId="status-filter-label"
+                id="status-filter"
+                value={statusFilter}
+                label="Filter"
+                onChange={(event: SelectChangeEvent) =>
+                  setStatusFilter(event.target.value)
+                }
               >
-                Unread only{unreadInQueue > 0 ? ` (${unreadInQueue})` : ""}
-              </Button>
-              <Button
-                size="small"
-                variant="text"
-                startIcon={<MarkEmailReadIcon />}
-                disabled={unreadInQueue === 0}
-                onClick={markAllVisibleRead}
-                sx={{ whiteSpace: "nowrap" }}
-              >
-                Mark all as read
-              </Button>
-              <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel id="status-filter-label">Filter</InputLabel>
-                <Select
-                  labelId="status-filter-label"
-                  id="status-filter"
-                  value={statusFilter}
-                  label="Filter"
-                  onChange={(event: SelectChangeEvent) =>
-                    setStatusFilter(event.target.value)
-                  }
-                >
-                  <MenuItem value="all">All Status</MenuItem>
-                  {DOCUMENT_STATUSES.map((status) => (
-                    <MenuItem key={status} value={status}>
-                      {status}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Stack>
+                <MenuItem value="all">All Status</MenuItem>
+                {DOCUMENT_STATUSES.map((status) => (
+                  <MenuItem key={status} value={status}>
+                    {status}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Stack>
 
           {isLoading ? (
@@ -316,9 +265,7 @@ export default function DocumentRequestsPage() {
             </Box>
           ) : filteredDocuments.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              {unreadOnly
-                ? "No unread document requests match these filters."
-                : "No document requests found."}
+              No document requests found.
             </Typography>
           ) : (
             <TableContainer>
@@ -347,15 +294,12 @@ export default function DocumentRequestsPage() {
                         },
                       })}
                     >
-                      <TableCell sx={{ fontWeight: isUnread(doc) ? 700 : 400 }}>
+                      <TableCell sx={{ fontWeight: 600 }}>
                         {doc.requestId}
                       </TableCell>
                       <TableCell>
                         <Box>
-                          <Typography
-                            variant="body2"
-                            sx={{ fontWeight: isUnread(doc) ? 700 : 400 }}
-                          >
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
                             {doc.applicantDetails?.fullName ?? "—"}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
@@ -401,42 +345,15 @@ export default function DocumentRequestsPage() {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Tooltip
-                            title={
-                              isUnread(doc) ? "Mark as read" : "Mark as unread"
-                            }
+                        <Tooltip title="View processing history">
+                          <IconButton
+                            size="small"
+                            aria-label={`View processing history for ${doc.requestId}`}
+                            onClick={() => setHistoryDoc(doc)}
                           >
-                            <IconButton
-                              size="small"
-                              aria-label={
-                                isUnread(doc)
-                                  ? `Mark ${doc.requestId} as read`
-                                  : `Mark ${doc.requestId} as unread`
-                              }
-                              onClick={() =>
-                                isUnread(doc)
-                                  ? markRecordsRead([doc.requestId])
-                                  : markRecordsUnread([doc.requestId])
-                              }
-                            >
-                              {isUnread(doc) ? (
-                                <MarkEmailReadIcon fontSize="small" />
-                              ) : (
-                                <MarkEmailUnreadIcon fontSize="small" />
-                              )}
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="View processing history">
-                            <IconButton
-                              size="small"
-                              aria-label={`View processing history for ${doc.requestId}`}
-                              onClick={() => openHistory(doc)}
-                            >
-                              <HistoryIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </Stack>
+                            <HistoryIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       </TableCell>
                     </TableRow>
                   ))}

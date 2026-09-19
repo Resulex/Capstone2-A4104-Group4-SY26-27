@@ -20,7 +20,7 @@ import { getCognitoGateway, isCognitoOffline } from '../shared/cognito';
  * This script calls AdminDeleteSoftwareToken for each targeted admin. On the
  * next sign-in the pool (MFA required, TOTP only) returns an MFA_SETUP
  * challenge, so the admin is prompted to scan a fresh QR and re-enroll via
- * POST /auth/admin/login/totp/setup + /totp/verify.
+ * POST /auth/admin/login/totp/setup + /totp/verify (which signs them in).
  *
  * NOTE: AdminSetUserMFAPreference does NOT remove an existing TOTP token —
  * AdminDeleteSoftwareToken is the correct reset operation (AWS docs).

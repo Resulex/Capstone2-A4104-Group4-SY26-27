@@ -9,6 +9,8 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
+import { ContactNumberField } from "@/components/shared/ContactNumberField";
+import { contactNumberError, normalizeContactNumber } from "@/lib/phone";
 
 export interface BasicInfoValues {
   firstName: string;
@@ -23,7 +25,6 @@ export interface BasicInfoValues {
 type BasicErrors = Partial<Record<keyof BasicInfoValues, string>>;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PH_MOBILE_RE = /^(?:\+?63|0)9\d{9}$/;
 
 interface BasicInfoStepProps {
   /** Called with the validated Step 1 values when "NEXT" is pressed. */
@@ -63,11 +64,13 @@ export function BasicInfoStep({ onSubmit }: BasicInfoStepProps) {
     else if (!EMAIL_RE.test(values.email.trim()))
       next.email = "Enter a valid email address.";
 
-    const digits = values.contactNumber.replace(/[\s-]/g, "");
-    if (!values.contactNumber.trim()) next.contactNumber = "Contact number is required.";
-    else if (!PH_MOBILE_RE.test(digits))
-      next.contactNumber =
-        "Enter a valid Philippine mobile number (e.g., +63 9XX XXX XXXX).";
+    // Sign-up is the one place that requires a mobile number: it doubles as a
+    // login identifier, so a landline is not accepted here.
+    const contactProblem = contactNumberError(values.contactNumber, {
+      required: true,
+      mobileOnly: true,
+    });
+    if (contactProblem) next.contactNumber = contactProblem;
 
     if (!values.password) next.password = "Password is required.";
     else if (values.password.length < 8)
@@ -80,7 +83,7 @@ export function BasicInfoStep({ onSubmit }: BasicInfoStepProps) {
         firstName: values.firstName.trim(),
         lastName: values.lastName.trim(),
         email: values.email.trim(),
-        contactNumber: values.contactNumber.trim(),
+        contactNumber: normalizeContactNumber(values.contactNumber),
       });
     }
   };
@@ -136,15 +139,12 @@ export function BasicInfoStep({ onSubmit }: BasicInfoStepProps) {
           error={!!errors.email}
           helperText={errors.email}
         />
-        <TextField
-          label="Contact Number"
-          placeholder="+63 9XX XXX XXXX"
-          fullWidth
-          required
-          inputMode="tel"
-          autoComplete="tel"
+        <ContactNumberField
           value={values.contactNumber}
-          onChange={setField("contactNumber")}
+          onChange={(next) =>
+            setValues((v) => ({ ...v, contactNumber: next }))
+          }
+          required
           error={!!errors.contactNumber}
           helperText={errors.contactNumber}
         />
