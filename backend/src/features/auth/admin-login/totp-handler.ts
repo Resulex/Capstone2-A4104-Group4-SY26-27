@@ -8,6 +8,7 @@ import {
   forbiddenError,
 } from '../../../shared/errors';
 import { Admin } from '../../../models';
+import { signToken } from '../../../shared/auth';
 import { getCognitoGateway } from '../../../shared/cognito';
 
 interface TotpSetupBody {
@@ -103,15 +104,20 @@ export async function adminTotpSetup(
 /**
  * Auth — Admin Login TOTP Verify (step 2b)
  *
- * Use-case: confirm the admin can produce codes with the new authenticator
- * and enable software-token MFA for the account. The admin then signs in
- * again (step 1) and completes with a normal 6-digit code via /login/mfa.
+ * Use-case: confirm the admin can produce codes with the new authenticator,
+ * enable software-token MFA for the account, and sign the admin in. The
+ * challenge `session` already proves the password (step 1 is fail-closed) and
+ * `VerifySoftwareToken` proves possession of the authenticator, so this is the
+ * same credential strength as the /login/mfa path — the admin does NOT have to
+ * enter a second code.
  *
  * POST /auth/admin/login/totp/verify
  * Body: { userName|emailAddress, session, code }
  *
- * - 200 { data:{ setupComplete:true } } — authenticator registered.
+ * - 200 { data:{ setupComplete:true, token, user } } — registered + signed in.
+ * - 400 — missing session/code/identifier.
  * - 401 — invalid/expired session or code.
+ * - 403 — the admin account is not active.
  */
 export async function adminTotpVerify(
   event: APIGatewayProxyEvent,
@@ -129,15 +135,21 @@ export async function adminTotpVerify(
   const cognito = getCognitoGateway();
   const { sub } = await cognito.completeTotpSetup(username, session, code);
 
-  // Link the Cognito sub if this admin was provisioned before it was stored.
+  // Link the Cognito sub if this admin was provisioned before it was stored,
+  // and record the sign-in (best-effort; don't fail enrollment on a write
+  // error).
   if (!admin.cognitoSub) {
     admin.cognitoSub = sub;
-    await admin.save().catch(() => null);
   }
+  admin.lastLogin = new Date();
+  await admin.save().catch(() => null);
+
+  // Same session JWT the /login/mfa path issues — enrollment doubles as login.
+  const token = signToken(String(admin.id), 'admin');
 
   return ok(
-    { setupComplete: true },
-    'Two-factor authentication is enabled. Sign in again to continue.'
+    { setupComplete: true, token, user: admin.toPublicJSON() },
+    'Two-factor authentication is enabled.'
   );
 }
 

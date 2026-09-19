@@ -252,9 +252,11 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // The console is only "online" when the browser has a network connection AND
-  // the real-time WebSocket is connected.
-  const isOnline = browserOnline && connectionStatus === "connected";
+  // The status chip distinguishes two different degradations, so the shell hands
+  // it both facts instead of one combined boolean: whether the device still has
+  // a network connection, and whether the push channel is up. (`OnlineStatusProvider`
+  // below stays browser-only on purpose — form buttons must not disable just
+  // because the WebSocket happens to be reconnecting.)
 
   // ---- End real-time admin notifications ----------------------------------
 
@@ -299,7 +301,8 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         unreadCount={unreadCount}
         onMarkRead={markNotificationRead}
         onMarkAllRead={markAllRead}
-        online={isOnline}
+        browserOnline={browserOnline}
+        socketConnected={connectionStatus === "connected"}
         title={title}
       />
 
@@ -328,6 +331,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           holds while the pointer or keyboard focus is on it. */}
       <NotificationToast
         notificationKey={toast?.notificationId ?? toast?._id ?? null}
+        title={toast?.titleText}
         body={toast?.messageBody ?? ""}
         onClose={dismissToast}
         maxWidth={400}

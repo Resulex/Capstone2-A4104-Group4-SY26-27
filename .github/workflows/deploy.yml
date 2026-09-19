@@ -72,6 +72,19 @@ jobs:
       APP_BASE_URL: ${{ vars.APP_BASE_URL }}
       SES_FROM_ADDRESS: ${{ vars.SES_FROM_ADDRESS }}
       SES_REGION: ${{ vars.SES_REGION }}
+      # Management-API endpoint that real-time notification pushes target
+      # (`src/shared/ws.ts`). serverless.yml resolves it with
+      # `${env:WEBSOCKET_ENDPOINT, ''}`, so an unset value ships an EMPTY
+      # string — `getClient()` then returns null and every broadcast becomes a
+      # silent no-op while the HTTP API keeps working. That was the deployed
+      # symptom on 2026-09-20: admin alerts only ever arrived through the 8s
+      # polling fallback, with no toast and no sound. It is also listed in the
+      # preflight below, so a blank value now fails the deploy.
+      #
+      # Value: wss://<api-id>.execute-api.<region>.amazonaws.com/<stage>, i.e.
+      # the WebSocket API the `ws-*` functions create. A loopback value is
+      # refused at runtime unless IS_OFFLINE=true — never point it at localhost.
+      WEBSOCKET_ENDPOINT: ${{ vars.WEBSOCKET_ENDPOINT }}
       # Deployed functions must talk to the real Cognito pool; `true` is a
       # local-development escape hatch only.
       COGNITO_OFFLINE: 'false'
@@ -95,7 +108,10 @@ jobs:
           # serverless.yml resolves each with `${env:X, ''}`, so an unset value
           # ships an empty string instead of failing the deploy, and the
           # runtime answer is a 500 that says nothing about the cause.
-          for name in AWS_DEPLOY_ROLE_ARN AWS_REGION STAGE API_BACKEND_URL APP_BASE_URL MONGODB_URI JWT_SECRET TOTP_SECRET_ENCRYPTION_KEY COGNITO_USER_POOL_ID COGNITO_CLIENT_ID COGNITO_CLIENT_SECRET; do
+          # WEBSOCKET_ENDPOINT is here for the same reason as the COGNITO_* trio:
+          # an unset value ships an empty string and turns real-time push into a
+          # silent no-op instead of failing the deploy.
+          for name in AWS_DEPLOY_ROLE_ARN AWS_REGION STAGE API_BACKEND_URL APP_BASE_URL MONGODB_URI JWT_SECRET TOTP_SECRET_ENCRYPTION_KEY COGNITO_USER_POOL_ID COGNITO_CLIENT_ID COGNITO_CLIENT_SECRET WEBSOCKET_ENDPOINT; do
             if [ -z "${!name:-}" ]; then missing+=("$name"); fi
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -237,6 +253,12 @@ jobs:
       AMPLIFY_BRANCH: ${{ vars.AMPLIFY_BRANCH_NAME || 'main' }}
       API_BACKEND_URL: ${{ vars.API_BACKEND_URL }}
       STAGE: ${{ vars.STAGE }}
+      # Build-time only: Next inlines `NEXT_PUBLIC_*` into the browser bundle
+      # (`src/hooks/useWebSocket.ts`), so this is synced to the Amplify branch
+      # below and needs a NEW build to take effect. Without it the deployed
+      # client falls back to `ws://localhost:3001` — a socket to the visitor's
+      # own machine — and no admin or resident ever receives a push.
+      NEXT_PUBLIC_WEBSOCKET_URL: ${{ vars.NEXT_PUBLIC_WEBSOCKET_URL }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -280,7 +302,7 @@ jobs:
             --branch-name "$AMPLIFY_BRANCH" \
             --no-enable-auto-build \
             --environment-variables \
-              "API_BACKEND_URL=${API_BACKEND_URL},API_BACKEND_STAGE=${STAGE},SESSION_COOKIE_MAX_AGE_SECONDS=${SESSION_COOKIE_MAX_AGE_SECONDS},COOKIE_SECURE=true" \
+              "API_BACKEND_URL=${API_BACKEND_URL},API_BACKEND_STAGE=${STAGE},SESSION_COOKIE_MAX_AGE_SECONDS=${SESSION_COOKIE_MAX_AGE_SECONDS},COOKIE_SECURE=true,NEXT_PUBLIC_WEBSOCKET_URL=${NEXT_PUBLIC_WEBSOCKET_URL}" \
             --output json > /dev/null
           echo "Amplify branch '${AMPLIFY_BRANCH}' config synced (auto-build disabled)."
 

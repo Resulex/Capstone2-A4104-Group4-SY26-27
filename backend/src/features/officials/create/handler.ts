@@ -5,6 +5,10 @@ import { created, badRequest } from '../../../shared/responses';
 import { conflictError } from '../../../shared/errors';
 import { Official } from '../../../models';
 import { getAuthContext, requireStaffOrAdmin } from '../../../shared/authorization';
+import {
+  contactNumberViolation,
+  normalizeContactNumber,
+} from '../../../shared/contact-number';
 
 interface CreateOfficialBody {
   officialId?: string;
@@ -38,6 +42,11 @@ export async function createOfficial(
     );
   }
 
+  const contactProblem = contactNumberViolation(contactNumber, { required: true });
+  if (contactProblem) {
+    return badRequest(contactProblem);
+  }
+
   await connectToDatabase();
 
   const existing = await Official.findOne({
@@ -51,7 +60,7 @@ export async function createOfficial(
     officialId,
     fullName,
     designatedPosition,
-    contactNumber,
+    contactNumber: normalizeContactNumber(contactNumber),
     emailAddress: emailAddress.toLowerCase(),
     officeLocation,
     coreResponsibilities: body.coreResponsibilities || [],

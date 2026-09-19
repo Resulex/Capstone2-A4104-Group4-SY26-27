@@ -3,6 +3,7 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody } from '../../../shared/handler';
 import { created, badRequest } from '../../../shared/responses';
 import { conflictError } from '../../../shared/errors';
+import { contactNumberViolation, normalizeContactNumber } from '../../../shared/contact-number';
 import { Barangay, Resident, User } from '../../../models';
 import { hashPassword } from '../../../shared/password';
 
@@ -69,6 +70,15 @@ export async function register(
     );
   }
 
+  // Optional here, but when supplied it must be a PH mobile number: it doubles
+  // as a login identifier, so a landline is not accepted on this route.
+  const contactProblem = contactNumberViolation(contactNumber, {
+    mobileOnly: true,
+  });
+  if (contactProblem) {
+    return badRequest(contactProblem);
+  }
+
   await connectToDatabase();
 
   const existing = await User.findOne({ email: email.toLowerCase() });
@@ -99,7 +109,9 @@ export async function register(
     middleName: middleName || undefined,
     suffix: suffix || undefined,
     email: email.toLowerCase(),
-    contactNumber: contactNumber || undefined,
+    contactNumber: contactNumber
+      ? normalizeContactNumber(contactNumber)
+      : undefined,
     passwordHash,
     barangay: barangay._id,
     // Denormalized read-only address, sourced from the barangay.
@@ -121,7 +133,9 @@ export async function register(
     middleName: middleName || undefined,
     suffix: suffix || undefined,
     emailAddress: email.toLowerCase(),
-    contactNumber: contactNumber || undefined,
+    contactNumber: contactNumber
+      ? normalizeContactNumber(contactNumber)
+      : undefined,
     houseUnitNumber: houseUnitNumber || undefined,
     streetPurokName: streetPurokName || undefined,
     barangay: barangay._id,

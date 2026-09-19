@@ -186,9 +186,11 @@ Flow:
    - `MFA_SETUP` (first login) → `{ needsTotpSetup, session }` → step 2.
 2. Enrollment (first login): `POST /auth/admin/login/totp/setup` calls
    `AssociateSoftwareToken` and returns the QR/`otpauth` URI;
-   `POST /auth/admin/login/totp/verify` calls `VerifySoftwareToken` and sets
-   the software-token MFA preference. The admin signs in again (step 1), which
-   now returns `SOFTWARE_TOKEN_MFA`.
+   `POST /auth/admin/login/totp/verify` calls `VerifySoftwareToken`, sets the
+   software-token MFA preference, and **issues the session JWT** — the admin is
+   signed in by the enrollment itself (no second code, no re-login). The
+   challenge `session` proves the password, the verified code proves the
+   authenticator, so this matches the `/login/mfa` credential strength.
 3. `POST /auth/admin/login/mfa` `{ userName|emailAddress, session, code }` —
    `AdminRespondToAuthChallenge` (`SOFTWARE_TOKEN_MFA`); the backend maps the
    Cognito `sub` → Mongo `Admin` (`cognitoSub`) and `signToken` issues the
@@ -229,6 +231,14 @@ emailed by Amazon SES** — the admin never types a code:
   token is treated as an invalid link. Resetting the password does not touch TOTP
   enrollment — an admin who also lost their authenticator still needs
   `npm run reset:mfa`.
+  Because this flow never sees the current password, reuse is caught by asking
+  the pool: `CognitoGateway.verifyPassword` is called with the *submitted* value
+  before anything is written, and a match is answered `400` ("The new password
+  must be different from the current password.") without consuming the token, so
+  the same link still works for a second attempt. That check **fails open** — it
+  guards against a no-op reset, not against an attacker, so an unreachable pool
+  or a missing `cognito-idp:AdminInitiateAuth` grant is logged and the reset
+  continues rather than stranding a locked-out admin.
 
 Implementation notes:
 

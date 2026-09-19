@@ -18,6 +18,8 @@ import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
 import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
 import { hasUnreadReference, type ChatSessionRecord } from "@/lib/admin";
 import { useResidentDashboard } from "@/context/ResidentDashboardContext";
+import { useAccessibilityTheme } from "@/context/ThemeContext";
+import { getUnreadCardSx } from "@/theme/theme";
 import { PageHeader } from "@/components/resident/PageHeader";
 // Hidden: chat-session status badge has no use case for now. Uncomment to restore.
 // import { StatusChip } from "@/components/resident/StatusChip";
@@ -39,6 +41,7 @@ export default function ChatSessionsPage() {
     markRecordsRead,
     markRecordsUnread,
   } = useResidentDashboard();
+  const { highContrast } = useAccessibilityTheme();
   const sessions = data.chatSessions;
   /** When true the grid shows only sessions with unseen replies. */
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -129,10 +132,9 @@ export default function ChatSessionsPage() {
               <Card
                 variant="outlined"
                 sx={{
-                  position: "relative",
                   borderRadius: 3,
-                  // Unread sessions get the same tint the notification centre uses.
-                  bgcolor: isUnread(session) ? "primary.light" : undefined,
+                  // Unread sessions get the shared unread wash + left accent bar.
+                  ...getUnreadCardSx(isUnread(session), highContrast),
                 }}
               >
                 <CardActionArea

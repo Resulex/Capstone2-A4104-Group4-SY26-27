@@ -14,8 +14,10 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { MediaUploader } from "@/components/shared/MediaUploader";
+import { ContactNumberField } from "@/components/shared/ContactNumberField";
 import { useAuth } from "@/context/AuthContext";
 import { fetchOfficial, OfficialRecord, updateOfficial } from "@/lib/admin";
+import { contactNumberError, normalizeContactNumber } from "@/lib/phone";
 
 /**
  * Admin — Edit Official.
@@ -65,7 +67,7 @@ export default function EditOfficialPage() {
         setForm({
           fullName: data.fullName ?? "",
           designatedPosition: data.designatedPosition ?? "",
-          contactNumber: data.contactNumber ?? "",
+          contactNumber: normalizeContactNumber(data.contactNumber ?? ""),
           emailAddress: data.emailAddress ?? "",
           officeLocation: data.officeLocation ?? "",
           coreResponsibilities: (data.coreResponsibilities ?? []).join("\n"),
@@ -97,13 +99,21 @@ export default function EditOfficialPage() {
     };
 
   const handleSave = async () => {
+    const contactProblem = contactNumberError(form.contactNumber, {
+      required: true,
+    });
+    if (contactProblem) {
+      setError(contactProblem);
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
       await updateOfficial(id, {
         fullName: form.fullName,
         designatedPosition: form.designatedPosition,
-        contactNumber: form.contactNumber,
+        contactNumber: normalizeContactNumber(form.contactNumber),
         emailAddress: form.emailAddress,
         officeLocation: form.officeLocation,
         coreResponsibilities: form.coreResponsibilities
@@ -181,11 +191,11 @@ export default function EditOfficialPage() {
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField
-                  label="Contact Number"
+                <ContactNumberField
                   value={form.contactNumber}
-                  onChange={setField("contactNumber")}
-                  fullWidth
+                  onChange={(next) =>
+                    setForm((prev) => ({ ...prev, contactNumber: next }))
+                  }
                 />
               </Grid>
               <Grid item xs={12} sm={6}>

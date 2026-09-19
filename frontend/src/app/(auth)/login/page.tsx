@@ -283,6 +283,12 @@ export default function ResidentLoginPage() {
         p: { xs: 3, sm: 4 },
         borderRadius: 3,
         bgcolor: getAuthCardSurface(highContrast),
+        // MUI outlined inputs are transparent by default, so on the tinted
+        // auth card the fields blended into the card. Put them back on the
+        // paper surface so every credential field reads as its own white box.
+        "& .MuiOutlinedInput-root": {
+          backgroundColor: (theme) => theme.palette.background.paper,
+        },
       }}
     >
       <Stack spacing={3}>

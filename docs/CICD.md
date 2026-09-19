@@ -130,15 +130,30 @@ Set by the bootstrap; listed here so the pipeline can be reproduced by hand.
 `AMPLIFY_BRANCH_NAME`, `SESSION_COOKIE_MAX_AGE_SECONDS`, `JWT_EXPIRES_IN`,
 `TOTP_ISSUER`, `TOTP_ENROLLMENT_JWT_TTL`, `COGNITO_USER_POOL_ID`,
 `COGNITO_CLIENT_ID`, `COGNITO_REGION`, `GOOGLE_CLIENT_ID`, `GOOGLE_REDIRECT_URI`,
-`S3_BUCKET_NAME`, `S3_BUCKET_REGION`.
+`S3_BUCKET_NAME`, `S3_BUCKET_REGION`, `WEBSOCKET_ENDPOINT`,
+`NEXT_PUBLIC_WEBSOCKET_URL`.
+
+`WEBSOCKET_ENDPOINT` and `NEXT_PUBLIC_WEBSOCKET_URL` both hold the same value:
+the `wss://` URL of the deployed WebSocket API, e.g.
+`wss://4ogxcelo9l.execute-api.ap-southeast-1.amazonaws.com/dev`. They are two
+variables rather than one because they are consumed in different places:
+`WEBSOCKET_ENDPOINT` is a Lambda runtime variable (`src/shared/ws.ts` posts to
+it via the API Gateway management API), while `NEXT_PUBLIC_WEBSOCKET_URL` is
+inlined into the browser bundle at build time by
+`frontend/src/hooks/useWebSocket.ts`. Missing either one degrades real-time
+delivery **silently** — the HTTP API keeps working and notifications still
+arrive through the 8s polling fallback — so the preflight asserts the backend
+one and `next.config.ts` warns about the frontend one at build time.
 
 `COGNITO_OFFLINE` is hard-coded to `false` in the workflow — it is a local
 development escape hatch and must never reach a deployed environment.
 
-> The preflight step also asserts `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`
-> and `COGNITO_CLIENT_SECRET`, because `serverless.yml` resolves each with
-> `${env:X, ''}` — an unset value would ship an empty string and admin login
-> would only fail later, at runtime, with a 500 that names no cause.
+> The preflight step also asserts `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`,
+> `COGNITO_CLIENT_SECRET` and `WEBSOCKET_ENDPOINT`, because `serverless.yml`
+> resolves each with `${env:X, ''}` — an unset `COGNITO_*` value would ship an
+> empty string and admin login would only fail later, at runtime, with a 500
+> that names no cause, and an unset `WEBSOCKET_ENDPOINT` ships an empty string
+> that turns every notification push into a silent no-op.
 
 The Lambda execution role's `cognito-idp` grants live in
 `backend/serverless.yml` (`provider.iam.role.statements`), so they ship with the
@@ -153,7 +168,8 @@ from the provider environment block.
 so GitHub is the single source of truth:
 
 ```
-API_BACKEND_URL, API_BACKEND_STAGE, SESSION_COOKIE_MAX_AGE_SECONDS, COOKIE_SECURE
+API_BACKEND_URL, API_BACKEND_STAGE, SESSION_COOKIE_MAX_AGE_SECONDS, COOKIE_SECURE,
+NEXT_PUBLIC_WEBSOCKET_URL
 ```
 
 > `aws amplify update-branch --environment-variables` **replaces the whole map.**
@@ -253,6 +269,31 @@ handler file with no route block is a silent 404 rather than a compile error. Ru
 full `npm run offline` restart locally (and a real deploy in production);
 `reloadHandler` only reloads handler code.
 
+**Notifications arrive but are late, and the admin console never makes a sound** —
+this is the two-variable WebSocket failure, not a notification bug. Check both
+ends before touching any handler code:
+
+1. Backend: `aws lambda get-function-configuration --function-name
+   kabarangayconnect-backend-dev-messages-create --query
+   'Environment.Variables.WEBSOCKET_ENDPOINT'` must print the `wss://` URL. An
+   empty string (or a `http://localhost:…` value, which `src/shared/ws.ts`
+   refuses outside `serverless offline`) means every push is a no-op. Note the
+   five broadcasters, all of which need the variable: `messages-create`,
+   `document-requests-create`, `document-requests-update`,
+   `incident-reports-create`, `incident-reports-update`.
+2. Frontend: the deployed bundle must contain the `wss://` URL. If it was built
+   without `NEXT_PUBLIC_WEBSOCKET_URL` it dials `ws://localhost:3001` — the
+   visitor's own machine — and the admin header's status chip stays amber
+   **Offline** even though the API works. Fixing it needs a **new Amplify
+   build**: `NEXT_PUBLIC_*` is inlined at build time, so changing the variable
+   alone changes nothing.
+
+Setting either value by hand in the AWS console only helps until the next deploy:
+`serverless deploy` rewrites the whole Lambda environment map from
+`serverless.yml`, and the workflow's `update-branch --environment-variables`
+replaces the whole Amplify branch map. Put them in GitHub Actions variables and
+reference them from `deploy.yml` (as it now does) instead.
+
 **The API smoke test fails with a non-400 status** — the deploy itself failed
 partway, or API Gateway is not routing. Check the CloudFormation stack events.
 
@@ -274,6 +315,17 @@ missing".
   and CI uses OIDC, so they are not needed for deployments — rotate them.
 - **Atlas network access must allow the Lambda egress addresses** (`0.0.0.0/0` or
   PrivateLink). Otherwise the deploy smoke test can pass while the app 500s.
-- Not covered: a `staging`/`prod` split, backend PR preview environments,
-  dependency updates (Dependabot), and a WebSocket deploy step — `serverless.yml`
-  declares no `websocket` events, so real-time delivery falls back to polling.
+- Not covered: a `staging`/`prod` split, backend PR preview environments, and
+  dependency updates (Dependabot).
+- **Real-time notifications run through the WebSocket API** declared at the end of
+  `backend/serverless.yml` (`ws-connect`/`$connect`, `ws-disconnect`,
+  `ws-default`). It is a real deployed resource: the current API is
+  `4ogxcelo9l` in `ap-southeast-1`. Two values must reach it — the Lambda's
+  `WEBSOCKET_ENDPOINT` and the browser's `NEXT_PUBLIC_WEBSOCKET_URL` — and if
+  either is missing there is **no error anywhere**: push becomes a no-op, the UI
+  drops to its 8s polling fallback, and because the admin console only raises a
+  toast/chime for socket-delivered items it simply looks "not real time, no
+  sound" while residents (who toast polled items too) look fine. That is the
+  2026-09-20 incident; see the troubleshooting entry above.
+  `npm --prefix backend run verify:routes` pins all three WS routes so they
+  cannot silently disappear from the config again.

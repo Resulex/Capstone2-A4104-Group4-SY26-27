@@ -135,9 +135,36 @@ async function confirmReset(
   if (!cognitoReady()) {
     throw serverError('Cognito is not configured.');
   }
+  const cognito = getCognitoGateway();
+
+  // Refuse a "reset" that would keep the SAME password. Unlike the self-service
+  // change (/auth/admin/password), this flow never sees the current password,
+  // so the only way to know it is to ask the pool — Cognito owns the credential,
+  // and a matching password reports as a successful auth rather than a failure.
+  //
+  // Runs BEFORE setPassword and before the token is burned, so a rejection
+  // leaves the emailed link usable and the admin can pick another password.
+  //
+  // Fail OPEN: this is a guard against a pointless no-op reset, not a security
+  // boundary. An unreachable pool (or a missing cognito-idp:AdminInitiateAuth
+  // grant) must not turn a forgotten password into an unrecoverable account —
+  // the failure is logged and the reset continues.
+  try {
+    if (await cognito.verifyPassword(admin.emailAddress, newPassword)) {
+      // 400, never 401/403: the frontend treats those as a dead session and
+      // would clear the kbc_token cookie (matching /auth/admin/password).
+      return badRequest('The new password must be different from the current password.');
+    }
+  } catch (err) {
+    console.warn(
+      `[admin-forgot] could not check ${admin.emailAddress} for password reuse; allowing the reset:`,
+      (err as Error)?.message || err
+    );
+  }
+
   // Cognito owns the admin password; this does not touch TOTP enrollment, so an
   // admin who also lost their authenticator still needs `npm run reset:mfa`.
-  await getCognitoGateway().setPassword(admin.emailAddress, newPassword);
+  await cognito.setPassword(admin.emailAddress, newPassword);
 
   // Mirror into Mongo: the offline stub signs in against this hash, and the
   // single-use token is burned by clearing it.

@@ -13,8 +13,10 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { MediaUploader } from "@/components/shared/MediaUploader";
+import { ContactNumberField } from "@/components/shared/ContactNumberField";
 import { useAuth } from "@/context/AuthContext";
 import { createOfficial } from "@/lib/admin";
+import { contactNumberError, normalizeContactNumber } from "@/lib/phone";
 
 /**
  * Admin — Add Official.
@@ -59,6 +61,13 @@ export default function AddOfficialPage() {
       setError("Please fill in all required fields.");
       return;
     }
+    const contactProblem = contactNumberError(form.contactNumber, {
+      required: true,
+    });
+    if (contactProblem) {
+      setError(contactProblem);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -66,7 +75,7 @@ export default function AddOfficialPage() {
         officialId: `off-${Date.now()}`,
         fullName: form.fullName.trim(),
         designatedPosition: form.designatedPosition.trim(),
-        contactNumber: form.contactNumber.trim(),
+        contactNumber: normalizeContactNumber(form.contactNumber),
         emailAddress: form.emailAddress.trim(),
         officeLocation: form.officeLocation.trim(),
         coreResponsibilities: form.coreResponsibilities
@@ -127,11 +136,11 @@ export default function AddOfficialPage() {
               />
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField
-                label="Contact Number"
+              <ContactNumberField
                 value={form.contactNumber}
-                onChange={setField("contactNumber")}
-                fullWidth
+                onChange={(next) =>
+                  setForm((prev) => ({ ...prev, contactNumber: next }))
+                }
                 required
               />
             </Grid>

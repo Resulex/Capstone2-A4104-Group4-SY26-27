@@ -17,11 +17,13 @@ import { useResident } from "@/context/ResidentContext";
 import { useResidentDashboard } from "@/context/ResidentDashboardContext";
 import { PageHeader } from "@/components/resident/PageHeader";
 import { MediaUploader } from "@/components/shared/MediaUploader";
+import { ContactNumberField } from "@/components/shared/ContactNumberField";
 import {
   DOCUMENT_PURPOSES,
   DOCUMENT_TYPES,
   createDocumentRequest,
 } from "@/lib/resident";
+import { contactNumberError, normalizeContactNumber } from "@/lib/phone";
 
 const PROCESSING_INFO = [
   "Processing time: 2–3 business days.",
@@ -52,8 +54,10 @@ export default function NewDocumentRequestPage() {
 
   const [documentType, setDocumentType] = useState("");
   const [purpose, setPurpose] = useState("");
-  const [contactNumber, setContactNumber] = useState(
-    () => profile?.contactNumber ?? "",
+  // Older profiles store the `+63…` country-code form, which the digits-only
+  // field would reject — normalize it into the local `09…` form up front.
+  const [contactNumber, setContactNumber] = useState(() =>
+    normalizeContactNumber(profile?.contactNumber ?? ""),
   );
   const [emailAddress, setEmailAddress] = useState(
     () => profile?.emailAddress ?? "",
@@ -76,6 +80,11 @@ export default function NewDocumentRequestPage() {
       );
       return;
     }
+    const contactProblem = contactNumberError(contact, { required: true });
+    if (contactProblem) {
+      setError(contactProblem);
+      return;
+    }
     if (!/^\S+@\S+\.\S+$/.test(email)) {
       setError("Please enter a valid email address.");
       return;
@@ -86,7 +95,7 @@ export default function NewDocumentRequestPage() {
       const created = await createDocumentRequest({
         documentType,
         purpose,
-        contactNumber: contact,
+        contactNumber: normalizeContactNumber(contact),
         emailAddress: email,
         expectedCompletionDate:
           expectedCompletionDate || defaultCompletionDate(),
@@ -160,13 +169,10 @@ export default function NewDocumentRequestPage() {
                 ))}
               </TextField>
 
-              <TextField
-                label="Contact Number"
+              <ContactNumberField
                 required
-                fullWidth
                 value={contactNumber}
-                onChange={(e) => setContactNumber(e.target.value)}
-                inputProps={{ "aria-label": "Contact number" }}
+                onChange={setContactNumber}
                 helperText="Mobile or landline number so the barangay can reach you about this request."
               />
 

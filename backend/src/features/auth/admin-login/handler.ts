@@ -34,7 +34,8 @@ interface AdminLoginBody {
  *   and complete via POST /auth/admin/login/mfa.
  * - 200 { data:{ authenticated:false, needsTotpSetup:true, session } } —
  *   password verified but no TOTP authenticator yet; run the QR setup
- *   (POST /auth/admin/login/totp/setup then /totp/verify), then re-login.
+ *   (POST /auth/admin/login/totp/setup then /totp/verify), which signs the
+ *   admin in — no second code / re-login.
  * - 200 { data:{ authenticated:false, needsNewPassword:true, session } } —
  *   first sign-in with the emailed temporary password; set a new one via
  *   POST /auth/admin/login/new-password, then continue to TOTP enrollment.
