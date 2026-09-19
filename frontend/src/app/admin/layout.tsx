@@ -225,7 +225,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     unreadCount,
     unreadIncidentIds,
     unreadDocumentIds,
-    unreadChatKeys,
+    awaitingReplyCount,
     toast,
     dismissToast,
     connectionStatus,
@@ -237,7 +237,10 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   // counted once, so each number equals the number of bold rows in that queue.
   const unreadIncidentsCount = unreadIncidentIds.size;
   const unreadDocumentsCount = unreadDocumentIds.size;
-  const unreadChatCount = unreadChatKeys.size;
+  // Exception: Live Chat is a SHARED queue, so its badge counts sessions nobody
+  // has answered yet rather than this admin's unread notifications. One teammate
+  // replying clears it for everyone; merely opening a thread does not.
+  const unreadChatCount = awaitingReplyCount;
 
   /**
    * Open the record a notification is about: mark that one notification read,

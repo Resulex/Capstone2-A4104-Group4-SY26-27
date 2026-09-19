@@ -149,6 +149,15 @@ export interface ChatSessionRecord {
   messageCount: number;
   startedAt?: string;
   lastActivity?: string;
+  /**
+   * Shared queue state: when the resident last wrote, and when any staff member
+   * (admin or official) last replied. Together these are the team-wide "awaiting
+   * reply" fact — see `needsReply()`. `null` is what the WebSocket payload sends
+   * for a missing timestamp, so accept both forms.
+   */
+  lastResidentMessageAt?: string | null;
+  lastStaffReplyAt?: string | null;
+  lastStaffReplyByName?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -413,6 +422,80 @@ export function hasUnreadReference(
   return keys.some((key) => (key ? unreadReferences.has(key) : false));
 }
 
+/**
+ * Every id a chat session's notifications may carry.
+ *
+ * Notifications written before the reference was standardised on the session id
+ * store the session's Mongo `_id`, or the linked incident's `_id` — so accept
+ * every id a session is addressable by rather than requiring a migration.
+ */
+export function chatSessionReferenceKeys(
+  session: ChatSessionRecord,
+): string[] {
+  return [session.sessionId, session._id, session.incidentId].filter(
+    (key): key is string => Boolean(key),
+  );
+}
+
+/**
+ * Every id an incident report's notifications may carry.
+ *
+ * Same reason as {@link chatSessionReferenceKeys}: notifications written before
+ * `referenceUrlId` was standardised on the `INC-…` id store the report's Mongo
+ * `_id` instead, and the `normalize-incident-ids` migration could only rewrite
+ * the rows it could match. Accepting both keys keeps a queue page's
+ * "Unread only (n)" equal to the sidebar badge — which counts the raw
+ * references — without needing another migration.
+ */
+export function incidentReferenceKeys(incident: IncidentRecord): string[] {
+  return [incident.incidentId, incident._id].filter(
+    (key): key is string => Boolean(key),
+  );
+}
+
+/** Every id a document request's notifications may carry (`REQ-…` / `_id`). */
+export function documentReferenceKeys(doc: DocumentQueueRecord): string[] {
+  return [doc.requestId, doc._id].filter(
+    (key): key is string => Boolean(key),
+  );
+}
+
+/**
+ * True when a chat session is waiting for a staff reply.
+ *
+ * This is the SHARED queue fact, derived from the session's own timestamps: the
+ * resident wrote, and nobody has written back since. It is deliberately not a
+ * `Notification.isRead` check — that flag is per-admin, so it can never tell a
+ * teammate that somebody else already answered, and a session could otherwise
+ * end up read by everyone and answered by no one.
+ *
+ * A session with no timestamps (dev data written before the fields existed) has
+ * no recorded resident message, so it reads as NOT awaiting rather than sitting
+ * permanently bold; `npm run migrate` backfills the real values.
+ */
+export function needsReply(session: ChatSessionRecord): boolean {
+  if (!session.lastResidentMessageAt) return false;
+  if (!session.lastStaffReplyAt) return true;
+  return (
+    new Date(session.lastResidentMessageAt).getTime() >
+    new Date(session.lastStaffReplyAt).getTime()
+  );
+}
+
+/**
+ * Newest activity first — mirrors the backend's `{ lastActivity: -1 }` sort, so a
+ * session that just moved keeps its place in the queue without a refetch.
+ */
+export function compareChatSessionsByRecency(
+  a: ChatSessionRecord,
+  b: ChatSessionRecord,
+): number {
+  return (
+    new Date(b.lastActivity ?? 0).getTime() -
+    new Date(a.lastActivity ?? 0).getTime()
+  );
+}
+
 /** Play a short notification chime via the Web Audio API (no asset file). */
 export function playNotificationSound(): void {
   if (typeof window === "undefined") return;
@@ -499,6 +582,19 @@ export async function fetchChatSessions(): Promise<ChatSessionRecord[]> {
   } catch {
     return [];
   }
+}
+
+/**
+ * Fetch all chat sessions, PROPAGATING errors.
+ *
+ * `fetchChatSessions()` above collapses a failure into `[]`, which is fine for a
+ * page that renders "No chat sessions found." but wrong for SHARED queue state:
+ * a transient 401/502 would read as "nothing needs a reply" and silently clear
+ * every Live Chat badge. Anything deriving a badge from this list must be able to
+ * keep the last good copy instead.
+ */
+export async function fetchChatSessionsStrict(): Promise<ChatSessionRecord[]> {
+  return getApi<ChatSessionRecord[]>("chat-sessions");
 }
 
 /** Update a chat session's active status via PATCH. */

@@ -11,14 +11,20 @@ import {
   useState,
 } from "react";
 import { useWebSocket, type WebSocketStatus } from "@/hooks/useWebSocket";
+import { useAdminProfile } from "@/hooks/useAdminProfile";
+import { canViewNavItem } from "@/lib/rbac";
 import {
+  ChatSessionRecord,
   NotificationRecord,
   applyReadState,
   collectUnreadReferences,
+  compareChatSessionsByRecency,
   fetchAdminWsToken,
+  fetchChatSessionsStrict,
   fetchMyNotifications,
   markAllNotificationsRead,
   markNotificationsByReference,
+  needsReply,
   playNotificationSound,
   updateNotification,
 } from "@/lib/admin";
@@ -35,7 +41,31 @@ interface AdminNotificationsContextValue {
    */
   unreadIncidentIds: Set<string>;
   unreadDocumentIds: Set<string>;
+  /**
+   * Unread *chat records* for the signed-in admin — the PERSONAL half of chat
+   * unread, used to guard clearing the caller's own bell rows.
+   *
+   * It is deliberately no longer what bolds a queue row or drives the badge: see
+   * `chatSessions` / `awaitingReplyCount` for that. Note this means the Live Chat
+   * badge and `markRecordsRead` move independently, which is intended — seeing a
+   * reply is personal, answering it is shared.
+   */
   unreadChatKeys: Set<string>;
+  /**
+   * The SHARED chat queue, newest activity first.
+   *
+   * Chat is the one queue whose outstanding work is a team fact rather than a
+   * personal one: any staff member may answer, so "does this still need a reply"
+   * cannot be derived from per-admin `notifications`. The shell needs this list to
+   * badge the sidebar, which is why it lives here instead of in the chat page.
+   */
+  chatSessions: ChatSessionRecord[];
+  /** Sessions no staff member has answered yet (the sidebar's Live Chat badge). */
+  awaitingReplyCount: number;
+  /** Re-read the shared queue, keeping the last good list if the call fails. */
+  refreshChatSessions: () => Promise<void>;
+  /** Merge a full session record (a REST result) into the shared queue. */
+  upsertChatSession: (session: ChatSessionRecord) => void;
   /** The notification currently raised as a toast, or null. */
   toast: NotificationRecord | null;
   dismissToast: () => void;
@@ -65,6 +95,14 @@ const AdminNotificationsContext =
  * persists across reloads, and needs no extra schema. A record whose
  * notifications are all read — or that never had one — simply shows as read.
  *
+ * Chat is the exception, and it is why this provider also owns the session list.
+ * A chat session is answered by whoever gets to it first, so the question its
+ * queue must answer is "does this still need a reply?" — a fact about the
+ * SESSION, not about one admin's inbox. Keeping that in per-admin `isRead` flags
+ * let a session be read by every admin and answered by none. So the two are kept
+ * apart on purpose: notifications still drive the bell (personal), while
+ * `chatSessions` drives the awaiting-reply badge and row styling (shared).
+ *
  * Marking is optimistic: local state flips first and one request follows. A
  * failed write therefore stays wrong until the next load re-syncs, which matches
  * the existing single-notification behaviour.
@@ -80,6 +118,86 @@ export function AdminNotificationsProvider({
   const seenNotifIdsRef = useRef<Set<string>>(new Set());
   // The seed fetch REPLACES the list, so polling must not merge before it lands.
   const seededNotifIdsRef = useRef(false);
+
+  /**
+   * The shared chat queue.
+   *
+   * Seeded once for roles that can open Live Chat, then kept current by
+   * `chatSessionUpdated` pushes, plus a re-read whenever a chat notification
+   * arrives — the self-healing path for when the socket is down but the
+   * notification poll still works.
+   */
+  const [chatSessions, setChatSessions] = useState<ChatSessionRecord[]>([]);
+  const chatFetchInFlightRef = useRef(false);
+  const { profile } = useAdminProfile();
+  // Fails closed on an unresolved role: no chat entry in the sidebar means no
+  // badge to compute, and INFO_OFFICER must not address the queue at all.
+  const canUseChatQueue = canViewNavItem(
+    profile?.assignedRole,
+    "/admin/chat-sessions",
+  );
+
+  /**
+   * Re-read the shared queue.
+   *
+   * Overlapping calls are dropped: a burst of chat alerts would otherwise fan out
+   * into a burst of Lambda invocations, and the call already in flight carries the
+   * newest state. A failure KEEPS the last good list rather than clearing the
+   * badge (see `fetchChatSessionsStrict`).
+   */
+  const refreshChatSessions = useCallback(async () => {
+    if (!canUseChatQueue || chatFetchInFlightRef.current) return;
+    chatFetchInFlightRef.current = true;
+    try {
+      const sessions = await fetchChatSessionsStrict();
+      setChatSessions(sessions.sort(compareChatSessionsByRecency));
+    } catch {
+      // Transient failure — keep showing the queue we already have.
+    } finally {
+      chatFetchInFlightRef.current = false;
+    }
+  }, [canUseChatQueue]);
+
+  useEffect(() => {
+    void refreshChatSessions();
+  }, [refreshChatSessions]);
+
+  /**
+   * Apply a pushed patch to one queue row.
+   *
+   * Merge-only: a session we do not hold yet is left to the next list read,
+   * because the pushed payload carries just the queue-relevant fields — inserting
+   * it would render a row with no resident and no incident to name it by.
+   */
+  const applyChatSessionPatch = useCallback(
+    (patch: Partial<ChatSessionRecord> & { sessionId: string }) => {
+      setChatSessions((prev) => {
+        const index = prev.findIndex((s) => s.sessionId === patch.sessionId);
+        if (index === -1) return prev;
+        const next = [...prev];
+        next[index] = { ...next[index], ...patch };
+        return next.sort(compareChatSessionsByRecency);
+      });
+    },
+    [],
+  );
+
+  /**
+   * Merge a FULL session record into the queue.
+   *
+   * The REST results (create/update) carry every field, so an unknown session is
+   * appended here — that is the difference from `applyChatSessionPatch`.
+   */
+  const upsertChatSession = useCallback((session: ChatSessionRecord) => {
+    setChatSessions((prev) => {
+      const index = prev.findIndex((s) => s.sessionId === session.sessionId);
+      const next =
+        index === -1
+          ? [session, ...prev]
+          : prev.map((s, i) => (i === index ? { ...s, ...session } : s));
+      return next.sort(compareChatSessionsByRecency);
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,11 +250,25 @@ export function AdminNotificationsProvider({
       const message = data as {
         type?: string;
         notification?: NotificationRecord;
+        session?: Partial<ChatSessionRecord> & { sessionId?: string };
       };
-      if (message?.type !== "notification" || !message.notification) return;
-      mergeNotification(message.notification);
+      if (message?.type === "notification" && message.notification) {
+        mergeNotification(message.notification);
+        // A chat notification means the shared queue moved too. Re-read it rather
+        // than guessing at the timestamps from the notification: the push below is
+        // the instant path, and this is what heals a dead socket.
+        if (message.notification.notificationCategory === "chatMessage") {
+          void refreshChatSessions();
+        }
+        return;
+      }
+      if (message?.type === "chatSessionUpdated" && message.session?.sessionId) {
+        applyChatSessionPatch(
+          message.session as Partial<ChatSessionRecord> & { sessionId: string },
+        );
+      }
     },
-    [mergeNotification],
+    [mergeNotification, refreshChatSessions, applyChatSessionPatch],
   );
 
   const { connectionStatus } = useWebSocket({
@@ -210,6 +342,15 @@ export function AdminNotificationsProvider({
     () => collectUnreadReferences(notifications, "chatMessage"),
     [notifications],
   );
+  /**
+   * The sidebar's Live Chat badge: outstanding WORK, not unread mail. Dropping to
+   * zero the moment any teammate answers is the whole point — so this reads the
+   * session list, never `unreadChatKeys`.
+   */
+  const awaitingReplyCount = useMemo(
+    () => (canUseChatQueue ? chatSessions.filter(needsReply).length : 0),
+    [canUseChatQueue, chatSessions],
+  );
 
   const value = useMemo<AdminNotificationsContextValue>(
     () => ({
@@ -218,6 +359,10 @@ export function AdminNotificationsProvider({
       unreadIncidentIds,
       unreadDocumentIds,
       unreadChatKeys,
+      chatSessions,
+      awaitingReplyCount,
+      refreshChatSessions,
+      upsertChatSession,
       toast,
       dismissToast,
       connectionStatus,
@@ -232,6 +377,10 @@ export function AdminNotificationsProvider({
       unreadIncidentIds,
       unreadDocumentIds,
       unreadChatKeys,
+      chatSessions,
+      awaitingReplyCount,
+      refreshChatSessions,
+      upsertChatSession,
       toast,
       dismissToast,
       connectionStatus,

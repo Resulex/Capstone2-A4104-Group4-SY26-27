@@ -37,6 +37,9 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import ForumIcon from "@mui/icons-material/Forum";
 import HistoryIcon from "@mui/icons-material/History";
 import ImageIcon from "@mui/icons-material/Image";
+import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
+import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
+import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 import { useAuth } from "@/context/AuthContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { TimelineSteps } from "@/components/shared/TimelineSteps";
@@ -45,6 +48,8 @@ import {
   ResidentRecord,
   fetchIncidentReports,
   fetchResidents,
+  hasUnreadReference,
+  incidentReferenceKeys,
   updateIncidentReport,
 } from "@/lib/admin";
 import { isImageUrl } from "@/lib/uploads";
@@ -144,6 +149,9 @@ function IncidentsPageContent() {
   const incidentParam = searchParams.get("incident");
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
   const isOnline = useOnlineStatus();
+  // The same shared list the sidebar badge counts, so a row's bold state and its
+  // badge can never disagree.
+  const { unreadIncidentIds, markRecordsRead } = useAdminNotifications();
 
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
   const [reporterNames, setReporterNames] = useState<Map<string, string>>(
@@ -155,6 +163,8 @@ function IncidentsPageContent() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  /** When true the table shows only reports with unseen updates. */
+  const [unreadOnly, setUnreadOnly] = useState(false);
   /** Pending status change awaiting confirmation in the modal. */
   const [statusModal, setStatusModal] = useState<{
     incident: IncidentRecord;
@@ -226,6 +236,32 @@ function IncidentsPageContent() {
     openedIncidentParamRef.current = incidentParam;
     setHistoryIncident(match);
   }, [incidentParam, isLoading, incidents]);
+
+  /**
+   * Opening a record marks it seen: the admin has the report in front of them, so
+   * leaving its row bold would be a lie. Both dialogs count — the history view and
+   * the status-change confirmation the row's Select opens.
+   *
+   * Guarded on the reference still being unread, so re-opening a dialog (or the set
+   * re-identifying after an unrelated notification) cannot fire a pointless PATCH.
+   */
+  useEffect(() => {
+    const keys = historyIncident
+      ? incidentReferenceKeys(historyIncident).filter((key) =>
+          unreadIncidentIds.has(key),
+        )
+      : [];
+    if (keys.length > 0) markRecordsRead(keys);
+  }, [historyIncident, unreadIncidentIds, markRecordsRead]);
+
+  useEffect(() => {
+    const keys = statusModal
+      ? incidentReferenceKeys(statusModal.incident).filter((key) =>
+          unreadIncidentIds.has(key),
+        )
+      : [];
+    if (keys.length > 0) markRecordsRead(keys);
+  }, [statusModal, unreadIncidentIds, markRecordsRead]);
 
   /** Opens the confirmation modal for a status change (never fires directly). */
   const openStatusModal = (incident: IncidentRecord, newStatus: string) => {
@@ -302,11 +338,19 @@ function IncidentsPageContent() {
     return null;
   }
 
+  // Unread is counted per RECORD — a report can carry several notifications
+  // (created, then one per status change) — so this is exactly the number of bold
+  // rows, and it matches the sidebar's Incident Reports badge.
+  const isIncidentUnread = (incident: IncidentRecord) =>
+    hasUnreadReference(unreadIncidentIds, incidentReferenceKeys(incident));
+  const unreadCount = incidents.filter(isIncidentUnread).length;
+
   const filteredIncidents = (
     statusFilter === "all"
       ? incidents
       : incidents.filter((i) => i.incidentStatus === statusFilter)
   )
+    .filter((i) => !unreadOnly || isIncidentUnread(i))
     .slice()
     .sort(compareIncidents);
 
@@ -364,25 +408,63 @@ function IncidentsPageContent() {
               </Typography>
             </Stack>
 
-            <FormControl size="small" sx={{ minWidth: 180 }}>
-              <InputLabel id="incident-status-filter-label">Filter</InputLabel>
-              <Select
-                labelId="incident-status-filter-label"
-                id="incident-status-filter"
-                value={statusFilter}
-                label="Filter"
-                onChange={(event: SelectChangeEvent) =>
-                  setStatusFilter(event.target.value)
-                }
+            {/* Unread controls sit LEFT of the status filter and wrap with it, so
+                the row stays on one line on wide screens and never squeezes the
+                Select on narrow ones. */}
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              sx={{ flexWrap: "wrap", rowGap: 1 }}
+            >
+              <Button
+                size="small"
+                variant={unreadOnly ? "contained" : "outlined"}
+                color={unreadOnly ? "primary" : "inherit"}
+                startIcon={<MarkEmailUnreadIcon />}
+                aria-pressed={unreadOnly}
+                onClick={() => setUnreadOnly((prev) => !prev)}
+                sx={{ whiteSpace: "nowrap" }}
               >
-                <MenuItem value="all">All Statuses</MenuItem>
-                {INCIDENT_STATUSES.map((status) => (
-                  <MenuItem key={status} value={status}>
-                    {status}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                Unread only{unreadCount > 0 ? ` (${unreadCount})` : ""}
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                startIcon={<MarkEmailReadIcon />}
+                disabled={unreadCount === 0}
+                // Clears the WHOLE queue, not just the filtered rows: this is the
+                // page-level twin of the bell's "Read all", and what clears the
+                // sidebar badge.
+                onClick={() =>
+                  markRecordsRead(incidents.flatMap(incidentReferenceKeys))
+                }
+                sx={{ whiteSpace: "nowrap" }}
+              >
+                Mark all as read
+              </Button>
+              <FormControl size="small" sx={{ minWidth: 180 }}>
+                <InputLabel id="incident-status-filter-label">
+                  Filter
+                </InputLabel>
+                <Select
+                  labelId="incident-status-filter-label"
+                  id="incident-status-filter"
+                  value={statusFilter}
+                  label="Filter"
+                  onChange={(event: SelectChangeEvent) =>
+                    setStatusFilter(event.target.value)
+                  }
+                >
+                  <MenuItem value="all">All Statuses</MenuItem>
+                  {INCIDENT_STATUSES.map((status) => (
+                    <MenuItem key={status} value={status}>
+                      {status}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
           </Stack>
 
           {isLoading ? (
@@ -398,7 +480,9 @@ function IncidentsPageContent() {
             </Box>
           ) : filteredIncidents.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              No incident reports found.
+              {unreadOnly
+                ? "No unread incident reports."
+                : "No incident reports found."}
             </Typography>
           ) : (
             <TableContainer>
@@ -431,7 +515,13 @@ function IncidentsPageContent() {
                         },
                       })}
                     >
-                      <TableCell sx={{ fontWeight: 600 }}>
+                      {/* Bold while unread — the same signal the resident portal and
+                          the Live Chat queue use. Read rows keep their old weight. */}
+                      <TableCell
+                        sx={{
+                          fontWeight: isIncidentUnread(incident) ? 700 : 600,
+                        }}
+                      >
                         {incident.incidentId}
                       </TableCell>
                       <TableCell>{incident.incidentCategory}</TableCell>

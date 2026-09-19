@@ -22,7 +22,9 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
 import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
 import DeleteIcon from "@mui/icons-material/Delete";
+import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 import { useAuth } from "@/context/AuthContext";
+import { useAdminProfile } from "@/hooks/useAdminProfile";
 import {
   AdminRecord,
   NotificationRecord,
@@ -91,10 +93,20 @@ function formatDate(iso?: string): string {
 /**
  * Admin Notifications page — lists all notifications and lets an admin mark
  * them read/unread or delete them.
+ *
+ * Unlike the bell (which only ever holds the caller's own notifications), this
+ * table is an oversight view over EVERY recipient. The unread controls are
+ * therefore deliberately caller-scoped: "Unread only" keeps rows whose
+ * `recipientId` is this admin, and "Mark all as read" reuses the single-request
+ * `notifications/read-all` — nothing here writes to another person's inbox.
  */
 export default function NotificationsPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
+  const { profile } = useAdminProfile();
+  // The caller's own notification list, shared with the shell's bell: the bulk
+  // action updates both in one optimistic step.
+  const { markAllRead } = useAdminNotifications();
 
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [recipientNames, setRecipientNames] = useState<Map<string, string>>(
@@ -104,6 +116,8 @@ export default function NotificationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  /** When true the table shows only THIS admin's notifications that are unread. */
+  const [unreadOnly, setUnreadOnly] = useState(false);
 
   useEffect(() => {
     if (!isAuthLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -179,6 +193,34 @@ export default function NotificationsPage() {
     }
   };
 
+  /**
+   * The caller's own unread rows.
+   *
+   * A notification's `recipientId` is the recipient's Mongo `_id` — for an admin
+   * that is the `_id` on `/api/admin/profile` — so this needs no extra fetch.
+   */
+  const myUnread = notifications.filter(
+    (n) => n.recipientId === profile?._id && !n.isRead,
+  );
+  const unreadCount = myUnread.length;
+  const visible = unreadOnly ? myUnread : notifications;
+
+  /**
+   * Clear every one of the caller's notifications.
+   *
+   * `markAllRead` covers the shell (bell, toasts, the shared sidebar badge) with
+   * one `notifications/read-all` call; the page's own list is fetched separately,
+   * so it is patched here as well or the rows would stay bold until a reload.
+   */
+  const handleMarkAllRead = () => {
+    markAllRead();
+    setNotifications((prev) =>
+      prev.map((n) =>
+        n.recipientId === profile?._id ? { ...n, isRead: true } : n,
+      ),
+    );
+  };
+
   if (isAuthLoading || !isAuthenticated || user?.role !== "admin") {
     return null;
   }
@@ -200,11 +242,49 @@ export default function NotificationsPage() {
 
       <Card variant="outlined" sx={{ borderRadius: 3 }}>
         <CardContent sx={{ p: 3 }}>
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-            <NotificationsIcon color="primary" />
-            <Typography variant="h6" component="h3">
-              Notifications
-            </Typography>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            spacing={1}
+            sx={{ mb: 2, flexWrap: "wrap", rowGap: 1 }}
+          >
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <NotificationsIcon color="primary" />
+              <Typography variant="h6" component="h3">
+                Notifications
+              </Typography>
+            </Stack>
+
+            {/* Caller-scoped, unlike the table itself: see the component docs. */}
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              sx={{ flexWrap: "wrap", rowGap: 1 }}
+            >
+              <Button
+                size="small"
+                variant={unreadOnly ? "contained" : "outlined"}
+                color={unreadOnly ? "primary" : "inherit"}
+                startIcon={<MarkEmailUnreadIcon />}
+                aria-pressed={unreadOnly}
+                onClick={() => setUnreadOnly((prev) => !prev)}
+                sx={{ whiteSpace: "nowrap" }}
+              >
+                Unread only{unreadCount > 0 ? ` (${unreadCount})` : ""}
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                startIcon={<MarkEmailReadIcon />}
+                disabled={unreadCount === 0}
+                onClick={handleMarkAllRead}
+                sx={{ whiteSpace: "nowrap" }}
+              >
+                Mark all as read
+              </Button>
+            </Stack>
           </Stack>
 
           {isLoading ? (
@@ -218,9 +298,11 @@ export default function NotificationsPage() {
             >
               <CircularProgress aria-label="Loading notifications" />
             </Box>
-          ) : notifications.length === 0 ? (
+          ) : visible.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              No notifications found.
+              {unreadOnly
+                ? "No unread notifications for you."
+                : "No notifications found."}
             </Typography>
           ) : (
             <TableContainer>
@@ -237,7 +319,7 @@ export default function NotificationsPage() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {notifications.map((notification) => (
+                  {visible.map((notification) => (
                     <TableRow key={notification.notificationId} hover>
                       <TableCell>
                         <Chip
