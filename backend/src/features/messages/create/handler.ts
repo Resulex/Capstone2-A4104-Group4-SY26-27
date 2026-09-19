@@ -5,7 +5,7 @@ import { created, badRequest } from '../../../shared/responses';
 import { conflictError, badRequestError } from '../../../shared/errors';
 import { Message, ChatSession, Admin } from '../../../models';
 import { getAuthContext } from '../../../shared/authorization';
-import { sendAdminNotification, sendResidentNotification, residentFullName } from '../../../shared/notifications';
+import { notifyAllActiveAdmins, sendResidentNotification, residentFullName } from '../../../shared/notifications';
 
 interface CreateMessageBody {
   messageId?: string;
@@ -89,18 +89,25 @@ export async function createMessage(
   session.lastActivity = new Date();
   await session.save();
 
-  // Notify the session's assigned admin when a resident replies, over the
-  // real-time channel.
-  if (isUser && session.adminId) {
+  // Notify EVERY active admin when a resident replies.
+  //
+  // Chat is a shared staff queue: `chat-sessions/list` returns every session to
+  // every admin and any admin may reply, so addressing this to `session.adminId`
+  // alone left whoever was actually watching the console with no notification
+  // row — hence no bell entry and no Live Chat badge — and it vanished entirely
+  // once that responder account was re-provisioned (the session then points at a
+  // dangling Admin id). Incidents and documents already notify all admins.
+  //
+  // `referenceUrlId` is the session's own id, so one chat session maps to one
+  // unread record; the chat list still accepts the legacy incident-based value,
+  // so notifications written earlier resolve too.
+  if (isUser && session.residentId) {
     const name = await residentFullName(String(session.residentId));
-    await sendAdminNotification({
-      recipientId: String(session.adminId),
+    await notifyAllActiveAdmins({
       category: 'chatMessage',
       titleText: 'New Chat Reply',
       messageBody: `${name} replied in live chat: ${messageText}`,
-      referenceUrlId: session.incidentId
-        ? String(session.incidentId)
-        : String(session._id),
+      referenceUrlId: session.sessionId,
     });
   }
 

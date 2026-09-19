@@ -20,6 +20,7 @@ import ForumIcon from "@mui/icons-material/Forum";
 import SendIcon from "@mui/icons-material/Send";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useAuth } from "@/context/AuthContext";
+import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import {
   ChatMessageRecord,
@@ -29,6 +30,7 @@ import {
   fetchChatSessions,
   fetchIncidentReports,
   fetchResidents,
+  hasUnreadReference,
   searchMessages,
   sendMessage,
   updateChatSession,
@@ -45,6 +47,17 @@ function formatTime(iso?: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+/**
+ * Every id a session's notifications may carry. Chat notifications written
+ * before the switch to the session id store the incident's Mongo `_id`, so
+ * accept every id a session is addressable by.
+ */
+function referenceKeysFor(session: ChatSessionRecord): string[] {
+  return [session.sessionId, session._id, session.incidentId].filter(
+    (key): key is string => Boolean(key),
+  );
 }
 
 /**
@@ -73,6 +86,9 @@ function ChatSessionsPageContent() {
   const incidentParam = searchParams.get("incident");
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
   const isOnline = useOnlineStatus();
+  // Chat unread state lives in the shared admin notifications context, so the
+  // queue rows, the sidebar badge and the bell all read one list.
+  const { unreadChatKeys, markRecordsRead } = useAdminNotifications();
 
   const [sessions, setSessions] = useState<ChatSessionRecord[]>([]);
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
@@ -83,6 +99,7 @@ function ChatSessionsPageContent() {
     new Map(),
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [messages, setMessages] = useState<ChatMessageRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [threadLoading, setThreadLoading] = useState(false);
@@ -139,6 +156,17 @@ function ChatSessionsPageContent() {
     sessionsRef.current = sessions;
   }, [sessions]);
 
+  // A thread that is open on screen is read: clear its unread reply as soon as
+  // the notification arrives, rather than waiting for another row click. Guarded
+  // by the unread set itself, so it fires once per reply instead of every poll.
+  useEffect(() => {
+    if (!selectedId) return;
+    const session = sessions.find((s) => s.sessionId === selectedId);
+    if (!session) return;
+    const keys = referenceKeysFor(session);
+    if (hasUnreadReference(unreadChatKeys, keys)) markRecordsRead(keys);
+  }, [selectedId, sessions, unreadChatKeys, markRecordsRead]);
+
   // Poll the selected thread every few seconds for new messages. A failed poll
   // is ignored on purpose: it must never blank a thread that already loaded.
   useEffect(() => {
@@ -161,6 +189,15 @@ function ChatSessionsPageContent() {
   const selectedSession =
     sessions.find((s) => s.sessionId === selectedId) ?? null;
 
+  /** A session is unread while the signed-in admin still owns an unread
+   * notification pointing at it — the same rule the sidebar badge uses. */
+  const isSessionUnread = (session: ChatSessionRecord) =>
+    hasUnreadReference(unreadChatKeys, referenceKeysFor(session));
+  const unreadSessionCount = sessions.filter(isSessionUnread).length;
+  const visibleSessions = unreadOnly
+    ? sessions.filter(isSessionUnread)
+    : sessions;
+
   const loadMessages = async (session: ChatSessionRecord) => {
     setThreadLoading(true);
     setThreadError(null);
@@ -181,6 +218,9 @@ function ChatSessionsPageContent() {
 
   const selectSession = (session: ChatSessionRecord) => {
     setSelectedId(session.sessionId);
+    // Opening a thread reads it — the row stops being bold and the sidebar
+    // badge drops, exactly like opening an incident or document.
+    markRecordsRead(referenceKeysFor(session));
     void loadMessages(session);
   };
 
@@ -332,9 +372,26 @@ function ChatSessionsPageContent() {
                 sx={{ px: 3, pt: 3, pb: 1 }}
               >
                 <ForumIcon color="primary" />
-                <Typography variant="h6" component="h3">
+                <Typography variant="h6" component="h3" sx={{ flexGrow: 1 }}>
                   Sessions
                 </Typography>
+                <Button
+                  size="small"
+                  variant={unreadOnly ? "contained" : "outlined"}
+                  disabled={unreadSessionCount === 0}
+                  onClick={() => setUnreadOnly((prev) => !prev)}
+                >
+                  Unread only ({unreadSessionCount})
+                </Button>
+                <Button
+                  size="small"
+                  disabled={unreadSessionCount === 0}
+                  onClick={() =>
+                    markRecordsRead(visibleSessions.flatMap(referenceKeysFor))
+                  }
+                >
+                  Mark all as read
+                </Button>
               </Stack>
               {isLoading ? (
                 <Box
@@ -347,17 +404,19 @@ function ChatSessionsPageContent() {
                 >
                   <CircularProgress aria-label="Loading chat sessions" />
                 </Box>
-              ) : sessions.length === 0 ? (
+              ) : visibleSessions.length === 0 ? (
                 <Typography
                   variant="body2"
                   color="text.secondary"
                   sx={{ px: 3, pb: 3 }}
                 >
-                  No chat sessions found.
+                  {unreadOnly
+                    ? "No sessions with unread replies."
+                    : "No chat sessions found."}
                 </Typography>
               ) : (
                 <List sx={{ pb: 2 }}>
-                  {sessions.map((session) => (
+                  {visibleSessions.map((session) => (
                     <ListItemButton
                       key={session.sessionId}
                       selected={selectedId === session.sessionId}
@@ -370,7 +429,13 @@ function ChatSessionsPageContent() {
                           alignItems="center"
                           spacing={1}
                         >
-                          <Typography variant="body2" noWrap sx={{ fontWeight: 700 }}>
+                          <Typography
+                            variant="body2"
+                            noWrap
+                            sx={{
+                              fontWeight: isSessionUnread(session) ? 700 : 400,
+                            }}
+                          >
                             {residentNames.get(session.residentId) ??
                               session.sessionId}
                           </Typography>
