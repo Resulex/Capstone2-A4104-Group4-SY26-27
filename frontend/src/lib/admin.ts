@@ -518,15 +518,18 @@ export async function createChatSession(body: {
   return postApi<ChatSessionRecord>("chat-sessions", body);
 }
 
-/** Load a session's message thread (oldest first) via POST /messages/search. */
+/**
+ * Load a session's message thread (oldest first) via POST /messages/search.
+ *
+ * Errors PROPAGATE on purpose. Swallowing them (the previous
+ * `catch { return [] }`) made a rejected read — a 400/401/502 from the backend
+ * — indistinguishable from a genuinely empty thread, so the UI reported
+ * "No messages yet." for sessions that had history.
+ */
 export async function searchMessages(
   sessionId: string,
 ): Promise<ChatMessageRecord[]> {
-  try {
-    return await postApi<ChatMessageRecord[]>("messages/search", { sessionId });
-  } catch {
-    return [];
-  }
+  return postApi<ChatMessageRecord[]>("messages/search", { sessionId });
 }
 
 /** Send a chat message via POST /messages. */

@@ -86,6 +86,7 @@ function ChatSessionsPageContent() {
   const [messages, setMessages] = useState<ChatMessageRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [threadLoading, setThreadLoading] = useState(false);
+  const [threadError, setThreadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -138,7 +139,8 @@ function ChatSessionsPageContent() {
     sessionsRef.current = sessions;
   }, [sessions]);
 
-  // Poll the selected thread every few seconds for new messages.
+  // Poll the selected thread every few seconds for new messages. A failed poll
+  // is ignored on purpose: it must never blank a thread that already loaded.
   useEffect(() => {
     if (!selectedId) return;
     const interval = setInterval(async () => {
@@ -146,8 +148,12 @@ function ChatSessionsPageContent() {
         (s) => s.sessionId === selectedId,
       );
       if (!current) return;
-      const msgs = await searchMessages(current._id ?? current.sessionId);
-      setMessages(msgs);
+      try {
+        const msgs = await searchMessages(current._id ?? current.sessionId);
+        setMessages(msgs);
+      } catch {
+        // Transient failure — keep showing the last good thread.
+      }
     }, 5000);
     return () => clearInterval(interval);
   }, [selectedId]);
@@ -157,10 +163,20 @@ function ChatSessionsPageContent() {
 
   const loadMessages = async (session: ChatSessionRecord) => {
     setThreadLoading(true);
-    setMessages([]);
-    const msgs = await searchMessages(session._id ?? session.sessionId);
-    setMessages(msgs);
-    setThreadLoading(false);
+    setThreadError(null);
+    try {
+      const msgs = await searchMessages(session._id ?? session.sessionId);
+      setMessages(msgs);
+    } catch (err) {
+      // Surface the backend's reason instead of an empty-looking thread — an
+      // authorization problem must not read as "No messages yet."
+      setMessages([]);
+      setThreadError(
+        err instanceof Error ? err.message : "Failed to load messages.",
+      );
+    } finally {
+      setThreadLoading(false);
+    }
   };
 
   const selectSession = (session: ChatSessionRecord) => {
@@ -210,6 +226,7 @@ function ChatSessionsPageContent() {
         setSessions((prev) => [created, ...prev]);
         setSelectedId(created.sessionId);
         setMessages([]);
+        setThreadError(null);
         setNotice(
           `Opened a triage chat for ${incident.incidentId} (${created.sessionId}).`,
         );
@@ -241,6 +258,7 @@ function ChatSessionsPageContent() {
         messageText: text,
       });
       setMessages((prev) => [...prev, sent]);
+      setThreadError(null);
       setReplyText("");
       setSessions((prev) =>
         prev.map((s) =>
@@ -467,9 +485,26 @@ function ChatSessionsPageContent() {
                       >
                         <CircularProgress aria-label="Loading messages" />
                       </Box>
+                    ) : threadError ? (
+                      <Alert
+                        severity="error"
+                        action={
+                          <Button
+                            color="inherit"
+                            size="small"
+                            onClick={() => void loadMessages(selectedSession)}
+                          >
+                            Retry
+                          </Button>
+                        }
+                      >
+                        {threadError}
+                      </Alert>
                     ) : messages.length === 0 ? (
                       <Typography variant="body2" color="text.secondary">
-                        No messages yet.
+                        {selectedSession.messageCount > 0
+                          ? `${selectedSession.messageCount} message(s) are recorded for this session but could not be loaded.`
+                          : "No messages yet."}
                       </Typography>
                     ) : (
                       messages.map((message) => (

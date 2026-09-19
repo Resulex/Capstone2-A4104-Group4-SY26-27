@@ -249,6 +249,27 @@ export function assertOwnResidentRef(
   }
 }
 
+/**
+ * Whether the caller may read a chat session's messages.
+ *
+ * Live chat is a SHARED staff queue, not a private responder-to-resident
+ * thread: `chat-sessions/list` returns every session to every admin,
+ * `messages/create` lets any admin reply, and the session endpoints scope
+ * residents only (via `assertOwnResidentRecord`). The message READ gate has to
+ * agree with that, otherwise an admin who is not the session's `adminId` sees
+ * an empty thread for records that plainly exist.
+ *
+ * Returns a boolean rather than throwing so each caller keeps its own error
+ * contract (`messages/list` answers 400, `messages/get` answers 404).
+ */
+export function canReadSessionMessages(
+  auth: AuthContext,
+  session: { residentId?: unknown }
+): boolean {
+  if (auth.role === 'admin' || auth.role === 'official') return true;
+  return auth.userId === String(session.residentId);
+}
+
 // ---------------------------------------------------------------------------
 // Helpers for list filtering / lookups
 // ---------------------------------------------------------------------------
