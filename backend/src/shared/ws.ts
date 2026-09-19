@@ -80,6 +80,28 @@ export async function broadcastToAdmin(
 }
 
 /**
+ * Push one payload to several admins at once.
+ *
+ * Fan-out helper for SHARED state (e.g. a chat session that any staff member
+ * just answered), where every recipient must learn the same thing. Notification
+ * rows fan out per admin instead, because each recipient gets its own row.
+ *
+ * Takes resolved ids rather than a role filter so this module stays free of
+ * `authorization.ts` — which imports `notifications.ts`, which imports this file.
+ * Callers resolve the audience with `activeAdminIdsByRole()`.
+ */
+export async function broadcastToAdmins(
+  adminIds: string[],
+  payload: unknown
+): Promise<void> {
+  // Parallel on purpose: unlike sequential notification ids there is nothing to
+  // race here, and each `broadcastToAdmin` is already a safe no-op on its own.
+  await Promise.all(
+    adminIds.map((adminId) => broadcastToAdmin(adminId, payload))
+  );
+}
+
+/**
  * Push a JSON payload to every live WebSocket connection belonging to a
  * resident.
  *

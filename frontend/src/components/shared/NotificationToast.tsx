@@ -209,8 +209,8 @@ export function NotificationToast({
               cursor: "pointer",
             }}
           >
-            View
-            <ArrowForwardIcon sx={{ fontSize: 16 }} />
+            {/* View
+            <ArrowForwardIcon sx={{ fontSize: 16 }} /> */}
           </Box>
         )}
         {/* Time left before this toast closes itself. Decorative for screen

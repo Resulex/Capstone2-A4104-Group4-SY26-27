@@ -1,7 +1,7 @@
 import type { APIGatewayProxyEvent } from 'aws-lambda';
 import mongoose from 'mongoose';
 import { forbiddenError, unauthorizedError, notFoundError } from './errors';
-import { Admin } from '../models';
+import { Admin, Resident } from '../models';
 import { connectToDatabase } from '../config/db';
 import { residentFullName } from './notifications';
 
@@ -23,6 +23,19 @@ import { residentFullName } from './notifications';
 
 export type AppRole = 'resident' | 'official' | 'admin';
 export type AdminAssignedRole = 'SUPER_ADMIN' | 'OPERATIONS_CLERK' | 'INFO_OFFICER';
+
+/**
+ * Admin roles that may see the shared chat queue — the backend mirror of the
+ * frontend's `canAccessAdminRoute(role, '/admin/chat-sessions')` matrix.
+ *
+ * Chat notifications and the "awaiting reply" push are addressed to these roles
+ * ONLY: an INFO_OFFICER cannot open `/admin/chat-sessions`, so a chat alert for
+ * them was an unactionable bell entry. Keep this in step with `lib/rbac.ts`.
+ */
+export const CHAT_STAFF_ROLES: AdminAssignedRole[] = [
+  'SUPER_ADMIN',
+  'OPERATIONS_CLERK',
+];
 
 export interface AuthContext {
   userId: string;
@@ -150,6 +163,54 @@ export async function actorIdentity(
   }
 
   return null;
+}
+
+/**
+ * Display name for a STORED `senderId` (not a live caller).
+ *
+ * `Message.senderId` deliberately carries no `ref`: it is an Admin `_id` for an
+ * admin and a Resident `_id` for an official, so both collections are tried — the
+ * same resolution `actorIdentity()` applies to a caller. Returns null when
+ * neither matches (a re-provisioned account), which callers must treat as "name
+ * unknown" rather than falling back to a placeholder person.
+ *
+ * Read-only, unlike `actorIdentity`, so it is safe to use when re-deriving
+ * denormalized names that a later delete invalidated.
+ */
+export async function senderDisplayName(
+  senderId: unknown
+): Promise<string | null> {
+  if (!senderId) return null;
+  await connectToDatabase();
+  const id = String(senderId);
+
+  const joinName = (person: {
+    firstName?: string;
+    middleName?: string;
+    lastName?: string;
+    suffix?: string | null;
+  }): string | null =>
+    [person.firstName, person.middleName, person.lastName, person.suffix]
+      .filter(Boolean)
+      .join(' ') || null;
+
+  if (mongoose.isValidObjectId(id)) {
+    const admin = await Admin.findById(id)
+      .select('firstName middleName lastName userName')
+      .lean();
+    if (admin) return joinName(admin) ?? admin.userName ?? null;
+
+    const resident = await Resident.findById(id)
+      .select('firstName middleName lastName suffix')
+      .lean();
+    if (resident) return joinName(resident);
+  }
+
+  // Fall back to the human id, so a notification-style reference still resolves.
+  const byCustomId = await Resident.findOne({ residentId: id })
+    .select('firstName middleName lastName suffix')
+    .lean();
+  return byCustomId ? joinName(byCustomId) : null;
 }
 
 // ---------------------------------------------------------------------------

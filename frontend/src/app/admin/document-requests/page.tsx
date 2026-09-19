@@ -32,12 +32,17 @@ import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
 import DescriptionIcon from "@mui/icons-material/Description";
 import HistoryIcon from "@mui/icons-material/History";
+import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
+import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
+import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 import { useAuth } from "@/context/AuthContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { TimelineSteps } from "@/components/shared/TimelineSteps";
 import {
   DocumentQueueRecord,
+  documentReferenceKeys,
   fetchDocumentRequests,
+  hasUnreadReference,
   updateDocumentRequest,
 } from "@/lib/admin";
 
@@ -87,6 +92,9 @@ function DocumentRequestsPageContent() {
   const requestParam = searchParams.get("request");
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
   const isOnline = useOnlineStatus();
+  // The same shared list the sidebar badge counts, so a row's bold state and its
+  // badge can never disagree.
+  const { unreadDocumentIds, markRecordsRead } = useAdminNotifications();
 
   const [documents, setDocuments] = useState<DocumentQueueRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,6 +103,8 @@ function DocumentRequestsPageContent() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  /** When true the table shows only requests with unseen updates. */
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [statusModal, setStatusModal] = useState<{
     doc: DocumentQueueRecord;
     newStatus: string;
@@ -228,14 +238,48 @@ function DocumentRequestsPageContent() {
     setHistoryDoc(match);
   }, [requestParam, isLoading, documents]);
 
+  /**
+   * Opening a record marks it seen: the admin has the request in front of them, so
+   * leaving its row bold would be a lie. Both dialogs count — the history view and
+   * the status-change confirmation the row's Select opens.
+   *
+   * Guarded on the reference still being unread, so re-opening a dialog (or the set
+   * re-identifying after an unrelated notification) cannot fire a pointless PATCH.
+   */
+  useEffect(() => {
+    const keys = historyDoc
+      ? documentReferenceKeys(historyDoc).filter((key) =>
+          unreadDocumentIds.has(key),
+        )
+      : [];
+    if (keys.length > 0) markRecordsRead(keys);
+  }, [historyDoc, unreadDocumentIds, markRecordsRead]);
+
+  useEffect(() => {
+    const keys = statusModal
+      ? documentReferenceKeys(statusModal.doc).filter((key) =>
+          unreadDocumentIds.has(key),
+        )
+      : [];
+    if (keys.length > 0) markRecordsRead(keys);
+  }, [statusModal, unreadDocumentIds, markRecordsRead]);
+
   if (isAuthLoading || !isAuthenticated || user?.role !== "admin") {
     return null;
   }
 
-  const filteredDocuments =
+  // Unread is counted per RECORD — a request can carry several notifications
+  // (submitted, then one per status change) — so this is exactly the number of bold
+  // rows, and it matches the sidebar's Document Queue badge.
+  const isDocumentUnread = (doc: DocumentQueueRecord) =>
+    hasUnreadReference(unreadDocumentIds, documentReferenceKeys(doc));
+  const unreadCount = documents.filter(isDocumentUnread).length;
+
+  const filteredDocuments = (
     statusFilter === "all"
       ? documents
-      : documents.filter((d) => d.currentStatus === statusFilter);
+      : documents.filter((d) => d.currentStatus === statusFilter)
+  ).filter((d) => !unreadOnly || isDocumentUnread(d));
 
   return (
     <Box>
@@ -268,25 +312,61 @@ function DocumentRequestsPageContent() {
               </Typography>
             </Stack>
 
-            <FormControl size="small" sx={{ minWidth: 180 }}>
-              <InputLabel id="status-filter-label">Filter</InputLabel>
-              <Select
-                labelId="status-filter-label"
-                id="status-filter"
-                value={statusFilter}
-                label="Filter"
-                onChange={(event: SelectChangeEvent) =>
-                  setStatusFilter(event.target.value)
-                }
+            {/* Unread controls sit LEFT of the status filter and wrap with it, so
+                the row stays on one line on wide screens and never squeezes the
+                Select on narrow ones. */}
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              sx={{ flexWrap: "wrap", rowGap: 1 }}
+            >
+              <Button
+                size="small"
+                variant={unreadOnly ? "contained" : "outlined"}
+                color={unreadOnly ? "primary" : "inherit"}
+                startIcon={<MarkEmailUnreadIcon />}
+                aria-pressed={unreadOnly}
+                onClick={() => setUnreadOnly((prev) => !prev)}
+                sx={{ whiteSpace: "nowrap" }}
               >
-                <MenuItem value="all">All Status</MenuItem>
-                {DOCUMENT_STATUSES.map((status) => (
-                  <MenuItem key={status} value={status}>
-                    {status}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                Unread only{unreadCount > 0 ? ` (${unreadCount})` : ""}
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                startIcon={<MarkEmailReadIcon />}
+                disabled={unreadCount === 0}
+                // Clears the WHOLE queue, not just the filtered rows: this is the
+                // page-level twin of the bell's "Read all", and what clears the
+                // sidebar badge.
+                onClick={() =>
+                  markRecordsRead(documents.flatMap(documentReferenceKeys))
+                }
+                sx={{ whiteSpace: "nowrap" }}
+              >
+                Mark all as read
+              </Button>
+              <FormControl size="small" sx={{ minWidth: 180 }}>
+                <InputLabel id="status-filter-label">Filter</InputLabel>
+                <Select
+                  labelId="status-filter-label"
+                  id="status-filter"
+                  value={statusFilter}
+                  label="Filter"
+                  onChange={(event: SelectChangeEvent) =>
+                    setStatusFilter(event.target.value)
+                  }
+                >
+                  <MenuItem value="all">All Status</MenuItem>
+                  {DOCUMENT_STATUSES.map((status) => (
+                    <MenuItem key={status} value={status}>
+                      {status}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
           </Stack>
 
           {isLoading ? (
@@ -302,7 +382,9 @@ function DocumentRequestsPageContent() {
             </Box>
           ) : filteredDocuments.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              No document requests found.
+              {unreadOnly
+                ? "No unread document requests."
+                : "No document requests found."}
             </Typography>
           ) : (
             <TableContainer>
@@ -331,7 +413,13 @@ function DocumentRequestsPageContent() {
                         },
                       })}
                     >
-                      <TableCell sx={{ fontWeight: 600 }}>
+                      {/* Bold while unread — the same signal the resident portal and
+                          the Live Chat queue use. Read rows keep their old weight. */}
+                      <TableCell
+                        sx={{
+                          fontWeight: isDocumentUnread(doc) ? 700 : 600,
+                        }}
+                      >
                         {doc.requestId}
                       </TableCell>
                       <TableCell>

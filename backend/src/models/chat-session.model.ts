@@ -17,6 +17,25 @@ export interface IChatSession extends Document {
   messageCount: number;
   startedAt: Date;
   lastActivity: Date;
+  /**
+   * When the resident last wrote, i.e. when the queue started waiting.
+   *
+   * `lastResidentMessageAt` + `lastStaffReplyAt` are the SHARED "awaiting reply"
+   * fact for the whole staff queue — deliberately NOT `Notification.isRead`,
+   * which is per-admin and therefore cannot tell a teammate that somebody else
+   * already answered. See `needsReply()` in the frontend's `lib/admin.ts`.
+   */
+  lastResidentMessageAt?: Date;
+  /** When any staff member (admin or official) last replied. */
+  lastStaffReplyAt?: Date;
+  /** The staff member behind `lastStaffReplyAt`. Ref -> Admin, or a Resident for officials. */
+  lastStaffReplyById?: mongoose.Types.ObjectId;
+  /**
+   * Denormalized responder name, so the queue can show "Answered by …" without
+   * an admin lookup (an OPERATIONS_CLERK cannot list admins). Same snapshot
+   * trade-off as `timeline[].changedBy.fullName`.
+   */
+  lastStaffReplyByName?: string;
 }
 
 const deviceInfoSchema = new Schema<IDeviceInfo>(
@@ -55,6 +74,12 @@ const chatSessionSchema = new Schema<IChatSession>(
     messageCount: { type: Number, default: 0, min: 0 },
     startedAt: { type: Date, required: true, default: Date.now },
     lastActivity: { type: Date, required: true, default: Date.now },
+    // Optional on purpose: sessions created before these existed simply read as
+    // "not awaiting a reply" instead of requiring a migration to render.
+    lastResidentMessageAt: { type: Date },
+    lastStaffReplyAt: { type: Date },
+    lastStaffReplyById: { type: Schema.Types.ObjectId, ref: 'Admin' },
+    lastStaffReplyByName: { type: String, trim: true },
   },
   { timestamps: true }
 );

@@ -4,7 +4,7 @@ import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../..
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { Message, ChatSession } from '../../../models';
-import { getAuthContext } from '../../../shared/authorization';
+import { getAuthContext, senderDisplayName } from '../../../shared/authorization';
 
 /**
  * Messages — Delete
@@ -47,6 +47,47 @@ export async function deleteMessage(
 
   // Decrement session message count.
   if (session.messageCount > 0) session.messageCount -= 1;
+
+  // Re-derive the SHARED "awaiting reply" state from what is left, rather than
+  // trying to unpick the deleted message's effect on it: deleting the only staff
+  // reply must put the session back into the queue, and deleting the resident's
+  // last message must take it out. Two indexed lookups on a rare admin action.
+  const remaining = await Message.find({ sessionId: session._id })
+    .select('isUser sentTimestamp senderId')
+    .lean();
+  const latestFrom = (fromResident: boolean) => {
+    let latest: (typeof remaining)[number] | undefined;
+    for (const msg of remaining) {
+      if (msg.isUser !== fromResident) continue;
+      if (!latest || new Date(msg.sentTimestamp) > new Date(latest.sentTimestamp)) {
+        latest = msg;
+      }
+    }
+    return latest;
+  };
+
+  const lastResident = latestFrom(true);
+  const lastStaff = latestFrom(false);
+
+  session.lastResidentMessageAt = lastResident
+    ? new Date(lastResident.sentTimestamp)
+    : undefined;
+  session.lastStaffReplyAt = lastStaff
+    ? new Date(lastStaff.sentTimestamp)
+    : undefined;
+
+  if (lastStaff) {
+    // Re-derive the attribution too: keeping the deleted reply's name would credit
+    // whoever was unlucky enough to be the last sender of a message that no longer
+    // exists, while an older reply is now the one that answered the resident.
+    session.lastStaffReplyById = lastStaff.senderId;
+    session.lastStaffReplyByName =
+      (await senderDisplayName(lastStaff.senderId)) ?? undefined;
+  } else {
+    session.lastStaffReplyById = undefined;
+    session.lastStaffReplyByName = undefined;
+  }
+
   await session.save();
 
   return ok({ deleted: message.messageId }, 'Message deleted.');

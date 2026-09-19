@@ -15,11 +15,13 @@ import Grid from "@mui/material/Grid";
 import List from "@mui/material/List";
 import ListItemButton from "@mui/material/ListItemButton";
 import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import ForumIcon from "@mui/icons-material/Forum";
 import SendIcon from "@mui/icons-material/Send";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useAuth } from "@/context/AuthContext";
+import { useAdminProfile } from "@/hooks/useAdminProfile";
 import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import {
@@ -27,10 +29,11 @@ import {
   ChatSessionRecord,
   IncidentRecord,
   ResidentRecord,
-  fetchChatSessions,
+  chatSessionReferenceKeys,
   fetchIncidentReports,
   fetchResidents,
   hasUnreadReference,
+  needsReply,
   searchMessages,
   sendMessage,
   updateChatSession,
@@ -47,17 +50,6 @@ function formatTime(iso?: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
-}
-
-/**
- * Every id a session's notifications may carry. Chat notifications written
- * before the switch to the session id store the incident's Mongo `_id`, so
- * accept every id a session is addressable by.
- */
-function referenceKeysFor(session: ChatSessionRecord): string[] {
-  return [session.sessionId, session._id, session.incidentId].filter(
-    (key): key is string => Boolean(key),
-  );
 }
 
 /**
@@ -87,11 +79,34 @@ function ChatSessionsPageContent() {
   const sessionParam = searchParams.get("session");
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
   const isOnline = useOnlineStatus();
-  // Chat unread state lives in the shared admin notifications context, so the
-  // queue rows, the sidebar badge and the bell all read one list.
-  const { unreadChatKeys, markRecordsRead } = useAdminNotifications();
+  const { profile } = useAdminProfile();
+  /**
+   * The name stamped on a reply this admin sends, matching how the backend's
+   * `actorIdentity()` builds it. Only used for the optimistic echo — the server's
+   * broadcast carries the authoritative name a moment later.
+   */
+  const adminDisplayName =
+    [profile?.firstName, profile?.lastName].filter(Boolean).join(" ") ||
+    profile?.userName ||
+    "Staff";
+  /**
+   * The whole chat queue lives in the shared admin notifications context, not in
+   * this page: the sidebar badge counts the same sessions, and only the context
+   * receives the real-time push telling it a teammate answered.
+   *
+   * `sessions` is a local alias for that shared list, `markRecordsRead` still
+   * clears this admin's own bell rows — seeing a reply is personal, answering it
+   * is shared.
+   */
+  const {
+    unreadChatKeys,
+    chatSessions: sessions,
+    awaitingReplyCount,
+    refreshChatSessions,
+    upsertChatSession,
+    markRecordsRead,
+  } = useAdminNotifications();
 
-  const [sessions, setSessions] = useState<ChatSessionRecord[]>([]);
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
   const [residentNames, setResidentNames] = useState<Map<string, string>>(
     new Map(),
@@ -117,6 +132,14 @@ function ChatSessionsPageContent() {
   const creatingIncidentRef = useRef<string | null>(null);
   // Guards against re-opening the same deep-linked session on every render.
   const openedSessionParamRef = useRef<string | null>(null);
+  /**
+   * The `?incident=` equivalent of `openedSessionParamRef`.
+   *
+   * The effect below now re-runs on every queue update — which real-time pushes
+   * make frequent — so without this it would re-select the session and refetch its
+   * thread on each one.
+   */
+  const openedIncidentParamRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isAuthLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -124,17 +147,19 @@ function ChatSessionsPageContent() {
     }
   }, [isAuthLoading, isAuthenticated, user, router]);
 
+  // The queue itself is seeded by the shared provider; this page only loads the
+  // lookup tables that turn ids into names, and nudges a fresh read on arrival so
+  // the list is authoritative when an admin opens Live Chat.
   useEffect(() => {
     let cancelled = false;
+    void refreshChatSessions();
     (async () => {
       try {
-        const [sessionData, residentData, incidentData] = await Promise.all([
-          fetchChatSessions(),
+        const [residentData, incidentData] = await Promise.all([
           fetchResidents(),
           fetchIncidentReports(),
         ]);
         if (!cancelled) {
-          setSessions(sessionData);
           setIncidents(incidentData);
           setResidentNames(buildResidentMap(residentData));
           setIncidentLabels(buildIncidentMap(incidentData));
@@ -152,7 +177,7 @@ function ChatSessionsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshChatSessions]);
 
   // Keep a ref of sessions so the polling effect doesn't reset on every send.
   useEffect(() => {
@@ -166,7 +191,7 @@ function ChatSessionsPageContent() {
     if (!selectedId) return;
     const session = sessions.find((s) => s.sessionId === selectedId);
     if (!session) return;
-    const keys = referenceKeysFor(session);
+    const keys = chatSessionReferenceKeys(session);
     if (hasUnreadReference(unreadChatKeys, keys)) markRecordsRead(keys);
   }, [selectedId, sessions, unreadChatKeys, markRecordsRead]);
 
@@ -192,14 +217,23 @@ function ChatSessionsPageContent() {
   const selectedSession =
     sessions.find((s) => s.sessionId === selectedId) ?? null;
 
-  /** A session is unread while the signed-in admin still owns an unread
-   * notification pointing at it — the same rule the sidebar badge uses. */
-  const isSessionUnread = (session: ChatSessionRecord) =>
-    hasUnreadReference(unreadChatKeys, referenceKeysFor(session));
-  const unreadSessionCount = sessions.filter(isSessionUnread).length;
-  const visibleSessions = unreadOnly
-    ? sessions.filter(isSessionUnread)
-    : sessions;
+  /**
+   * A session is awaiting a reply while no staff member has answered the
+   * resident's last message — the SHARED rule the sidebar badge uses.
+   *
+   * Deliberately not this admin's unread notifications: that flag cannot tell a
+   * teammate somebody else answered, so a session could be read by all staff and
+   * answered by none.
+   */
+  const visibleSessions = unreadOnly ? sessions.filter(needsReply) : sessions;
+  /**
+   * This admin's own unread chat notifications, which only the bell-clearing
+   * action below uses. It can stay above zero on a session that is already
+   * answered — seeing a reply and owing one are different things.
+   */
+  const personallyUnreadCount = sessions.filter((session) =>
+    hasUnreadReference(unreadChatKeys, chatSessionReferenceKeys(session)),
+  ).length;
 
   const loadMessages = async (session: ChatSessionRecord) => {
     setThreadLoading(true);
@@ -221,9 +255,10 @@ function ChatSessionsPageContent() {
 
   const selectSession = (session: ChatSessionRecord) => {
     setSelectedId(session.sessionId);
-    // Opening a thread reads it — the row stops being bold and the sidebar
-    // badge drops, exactly like opening an incident or document.
-    markRecordsRead(referenceKeysFor(session));
+    // Opening a thread clears this admin's own bell rows, exactly like opening an
+    // incident or document. It deliberately does NOT un-bold the shared row: the
+    // session still has no answer, and a teammate still owes one.
+    markRecordsRead(chatSessionReferenceKeys(session));
     void loadMessages(session);
   };
 
@@ -255,6 +290,7 @@ function ChatSessionsPageContent() {
     }
 
     if (!incidentParam) return;
+    if (openedIncidentParamRef.current === incidentParam) return;
 
     const incident = incidents.find((i) => i.incidentId === incidentParam);
     const incidentKey = incident?._id ?? incidentParam;
@@ -265,6 +301,7 @@ function ChatSessionsPageContent() {
     );
     if (match) {
       creatingIncidentRef.current = null;
+      openedIncidentParamRef.current = incidentParam;
       selectSession(match);
       return;
     }
@@ -287,7 +324,8 @@ function ChatSessionsPageContent() {
           ipAddress: "0.0.0.0",
         });
         creatingIncidentRef.current = null;
-        setSessions((prev) => [created, ...prev]);
+        openedIncidentParamRef.current = incidentParam;
+        upsertChatSession(created);
         setSelectedId(created.sessionId);
         setMessages([]);
         setThreadError(null);
@@ -324,17 +362,17 @@ function ChatSessionsPageContent() {
       setMessages((prev) => [...prev, sent]);
       setThreadError(null);
       setReplyText("");
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.sessionId === session.sessionId
-            ? {
-                ...s,
-                messageCount: s.messageCount + 1,
-                lastActivity: new Date().toISOString(),
-              }
-            : s,
-        ),
-      );
+      // Answering is what settles the session for the whole team, so stamp the
+      // shared reply time locally: the row un-bolds and the badge drops without
+      // waiting for the server's broadcast, which arrives as confirmation.
+      const repliedAt = new Date().toISOString();
+      upsertChatSession({
+        ...session,
+        messageCount: session.messageCount + 1,
+        lastActivity: repliedAt,
+        lastStaffReplyAt: repliedAt,
+        lastStaffReplyByName: adminDisplayName,
+      });
     } catch (err) {
       setActionError(
         err instanceof Error ? err.message : "Failed to send message.",
@@ -351,11 +389,7 @@ function ChatSessionsPageContent() {
       const updated = await updateChatSession(session.sessionId, {
         isActive: !session.isActive,
       });
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.sessionId === session.sessionId ? { ...s, ...updated } : s,
-        ),
-      );
+      upsertChatSession(updated);
     } catch (err) {
       setActionError(
         err instanceof Error ? err.message : "Failed to update session.",
@@ -402,20 +436,31 @@ function ChatSessionsPageContent() {
                 <Button
                   size="small"
                   variant={unreadOnly ? "contained" : "outlined"}
-                  disabled={unreadSessionCount === 0}
+                  disabled={awaitingReplyCount === 0}
                   onClick={() => setUnreadOnly((prev) => !prev)}
                 >
-                  Unread only ({unreadSessionCount})
+                  Awaiting reply ({awaitingReplyCount})
                 </Button>
-                <Button
-                  size="small"
-                  disabled={unreadSessionCount === 0}
-                  onClick={() =>
-                    markRecordsRead(visibleSessions.flatMap(referenceKeysFor))
-                  }
-                >
-                  Mark all as read
-                </Button>
+                {/*
+                  Bell-only. Clearing notification rows cannot un-badge the sidebar
+                  any more, so the tooltip says so rather than letting the label
+                  imply it does.
+                */}
+                <Tooltip title="Clears your own notifications for these sessions. The Live Chat badge counts sessions nobody has answered yet.">
+                  <span>
+                    <Button
+                      size="small"
+                      disabled={personallyUnreadCount === 0}
+                      onClick={() =>
+                        markRecordsRead(
+                          visibleSessions.flatMap(chatSessionReferenceKeys),
+                        )
+                      }
+                    >
+                      Mark all as read
+                    </Button>
+                  </span>
+                </Tooltip>
               </Stack>
               {isLoading ? (
                 <Box
@@ -435,7 +480,7 @@ function ChatSessionsPageContent() {
                   sx={{ px: 3, pb: 3 }}
                 >
                   {unreadOnly
-                    ? "No sessions with unread replies."
+                    ? "No sessions awaiting a reply."
                     : "No chat sessions found."}
                 </Typography>
               ) : (
@@ -457,12 +502,20 @@ function ChatSessionsPageContent() {
                             variant="body2"
                             noWrap
                             sx={{
-                              fontWeight: isSessionUnread(session) ? 700 : 400,
+                              fontWeight: needsReply(session) ? 700 : 400,
                             }}
                           >
                             {residentNames.get(session.residentId) ??
                               session.sessionId}
                           </Typography>
+                          {needsReply(session) && (
+                            <Chip
+                              label="Awaiting reply"
+                              size="small"
+                              color="warning"
+                              variant="outlined"
+                            />
+                          )}
                           <Chip
                             label={session.isActive ? "Active" : "Closed"}
                             size="small"
@@ -529,6 +582,17 @@ function ChatSessionsPageContent() {
                       <Typography variant="caption" color="text.secondary">
                         Session {selectedSession.sessionId} ·{" "}
                         {incidentLabels.get(selectedSession.incidentId) ?? "—"}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ display: "block" }}
+                      >
+                        {selectedSession.lastStaffReplyAt
+                          ? `Answered by ${
+                              selectedSession.lastStaffReplyByName ?? "staff"
+                            } · ${formatTime(selectedSession.lastStaffReplyAt)}`
+                          : "No reply from the barangay yet"}
                       </Typography>
                     </Box>
                     <Stack direction="row" spacing={1}>

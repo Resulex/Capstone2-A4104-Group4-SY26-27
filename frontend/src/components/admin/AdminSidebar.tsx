@@ -57,7 +57,11 @@ interface AdminSidebarProps {
   unreadIncidentsCount?: number;
   /** Unread document requests (badge on the Document Queue nav icon). */
   unreadDocumentsCount?: number;
-  /** Live chat sessions awaiting the assigned admin's reply. */
+  /**
+   * Live chat sessions still waiting for a reply from ANY staff member — the one
+   * shared queue. Not this admin's unread notifications: the badge has to drop
+   * for everyone the moment somebody answers.
+   */
   unreadChatCount?: number;
 }
 

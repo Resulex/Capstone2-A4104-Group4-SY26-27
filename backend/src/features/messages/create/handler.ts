@@ -1,11 +1,18 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
+import mongoose from 'mongoose';
 import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { created, badRequest } from '../../../shared/responses';
 import { conflictError, badRequestError } from '../../../shared/errors';
-import { Message, ChatSession, Admin } from '../../../models';
-import { getAuthContext } from '../../../shared/authorization';
-import { notifyAllActiveAdmins, sendResidentNotification, residentFullName } from '../../../shared/notifications';
+import { Message, ChatSession, Admin, type IChatSession } from '../../../models';
+import { getAuthContext, actorIdentity, CHAT_STAFF_ROLES } from '../../../shared/authorization';
+import {
+  notifyAllActiveAdmins,
+  sendResidentNotification,
+  residentFullName,
+  activeAdminIdsByRole,
+} from '../../../shared/notifications';
+import { broadcastToAdmins } from '../../../shared/ws';
 
 interface CreateMessageBody {
   messageId?: string;
@@ -87,6 +94,26 @@ export async function createMessage(
   // Bump session message count + last activity.
   session.messageCount += 1;
   session.lastActivity = new Date();
+
+  // Stamp the SHARED "awaiting reply" state. `isUser` is the resident flag, so
+  // these two branches are exactly the two directions of the conversation: a
+  // resident message starts the wait, a staff reply ends it for the whole team.
+  if (isUser) {
+    session.lastResidentMessageAt = session.lastActivity;
+  } else {
+    session.lastStaffReplyAt = session.lastActivity;
+    const actor = await actorIdentity(auth);
+    // The name is the part the queue renders, so keep it even if the id is not a
+    // castable ObjectId — officials reply through the resident portal and their
+    // token `sub` is a Resident `_id`, which is what gets stored either way.
+    if (actor) {
+      if (mongoose.isValidObjectId(actor.userId)) {
+        session.lastStaffReplyById = new mongoose.Types.ObjectId(actor.userId);
+      }
+      session.lastStaffReplyByName = actor.fullName;
+    }
+  }
+
   await session.save();
 
   // Notify EVERY active admin when a resident replies.
@@ -98,16 +125,38 @@ export async function createMessage(
   // once that responder account was re-provisioned (the session then points at a
   // dangling Admin id). Incidents and documents already notify all admins.
   //
+  // Narrowed to `CHAT_STAFF_ROLES` because those are the only roles that can open
+  // /admin/chat-sessions; alerting an INFO_OFFICER produced a bell entry with no
+  // destination. The call returns the ids it notified, so the shared-state push
+  // below reaches exactly the same admins off ONE Admin lookup.
+  //
   // `referenceUrlId` is the session's own id, so one chat session maps to one
   // unread record; the chat list still accepts the legacy incident-based value,
   // so notifications written earlier resolve too.
   if (isUser && session.residentId) {
     const name = await residentFullName(String(session.residentId));
-    await notifyAllActiveAdmins({
-      category: 'chatMessage',
-      titleText: 'New Chat Reply',
-      messageBody: `${name} replied in live chat: ${messageText}`,
-      referenceUrlId: session.sessionId,
+    const staffAdminIds = await notifyAllActiveAdmins(
+      {
+        category: 'chatMessage',
+        titleText: 'New Chat Reply',
+        messageBody: `${name} replied in live chat: ${messageText}`,
+        referenceUrlId: session.sessionId,
+      },
+      { roles: CHAT_STAFF_ROLES }
+    );
+    await broadcastToAdmins(staffAdminIds, {
+      type: 'chatSessionUpdated',
+      session: chatSessionPayload(session),
+    });
+  } else if (!isUser) {
+    // A staff reply ANSWERS the session for everyone. Push the new shared state
+    // so a teammate's queue row un-bolds and its badge drops without a reload —
+    // their own per-admin bell entry is untouched, because they still were not the
+    // one who saw the reply arrive. No notification rows here: staff who did not
+    // reply have nothing to be told about their own team's action.
+    await broadcastToAdmins(await activeAdminIdsByRole(CHAT_STAFF_ROLES), {
+      type: 'chatSessionUpdated',
+      session: chatSessionPayload(session),
     });
   }
 
@@ -126,6 +175,30 @@ export async function createMessage(
   }
 
   return created(message.toObject(), 'Message sent.');
+}
+
+/**
+ * The slice of a chat session pushed over the WebSocket when its shared
+ * "awaiting reply" state changes.
+ *
+ * Built explicitly rather than `session.toObject()`: the client MERGES this into
+ * the row it already holds, so the contract is the fields that decide bolding
+ * plus the counters the queue renders — not device/IP metadata, and not the
+ * ObjectIds whose raw shape varies between `lean()` reads and hydrated docs.
+ */
+function chatSessionPayload(session: IChatSession) {
+  return {
+    sessionId: session.sessionId,
+    incidentId: String(session.incidentId),
+    residentId: String(session.residentId),
+    adminId: String(session.adminId),
+    isActive: session.isActive,
+    messageCount: session.messageCount,
+    lastActivity: session.lastActivity,
+    lastResidentMessageAt: session.lastResidentMessageAt ?? null,
+    lastStaffReplyAt: session.lastStaffReplyAt ?? null,
+    lastStaffReplyByName: session.lastStaffReplyByName ?? null,
+  };
 }
 
 export const handler = withErrorHandling(createMessage);
