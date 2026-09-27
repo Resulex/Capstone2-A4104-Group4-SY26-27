@@ -88,6 +88,12 @@ const REQUIRED_ROUTES = [
   { method: 'get', path: 'notifications/mine', auth: true, why: 'caller-scoped notification feed (admin bell + resident center)' },
   { method: 'patch', path: 'notifications/read-all', auth: true, why: "mark all of the caller's notifications read" },
   { method: 'patch', path: 'notifications/read-by-reference', auth: true, why: 'mark a queue row seen/unseen in one call (admin unread rows)' },
+  // --- Resident self-service account deletion (30-day recoverable window) ---
+  // The /account page's whole purpose is this trio, and a missing block is a
+  // silent 404 on the Delete button rather than a compile error. Pin them.
+  { method: 'post', path: 'residents/me/deletion', auth: true, why: 'request permanent account deletion (starts the grace window)' },
+  { method: 'get', path: 'residents/me/deletion', auth: true, why: 'read the caller’s own deletion state' },
+  { method: 'delete', path: 'residents/me/deletion', auth: true, why: 'restore (cancel) a pending account deletion' },
 ];
 
 /**

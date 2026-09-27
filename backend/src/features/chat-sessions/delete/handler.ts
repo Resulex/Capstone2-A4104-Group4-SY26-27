@@ -4,7 +4,7 @@ import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../..
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { ChatSession } from '../../../models';
-import { getAuthContext, assertOwnResidentRecord } from '../../../shared/authorization';
+import { getAuthContext, assertOwnResidentRecord, assertResidentRecordWritable } from '../../../shared/authorization';
 
 /**
  * Chat Sessions — Delete
@@ -27,6 +27,9 @@ export async function deleteChatSession(
   }
 
   assertOwnResidentRecord(auth, session.residentId);
+  // A session that predates the resident's account deletion can no longer be
+  // removed by them (staff may still delete it).
+  await assertResidentRecordWritable(auth, session);
   await session.deleteOne();
   return ok({ deleted: session.sessionId }, 'Chat session deleted.');
 }

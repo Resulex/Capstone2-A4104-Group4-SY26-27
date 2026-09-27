@@ -7,6 +7,7 @@ import { DocumentRequest } from '../../../models';
 import {
   getAuthContext,
   assertOwnResidentRecord,
+  assertResidentRecordVisible,
 } from '../../../shared/authorization';
 
 /**
@@ -31,6 +32,9 @@ export async function getDocumentRequest(
   }
 
   assertOwnResidentRecord(auth, request.residentId);
+  // A request that predates the resident's own account deletion is gone from
+  // their view: same 404 as one that never existed.
+  await assertResidentRecordVisible(auth, request, 'Document request');
   return ok(request.toObject(), 'Document request fetched.');
 }
 

@@ -40,6 +40,8 @@ export interface IDocumentRequest extends Document {
   timeline: IDocumentTimeline[];
   remarks?: string; // Latest admin note (mirrors the newest timeline entry)
   dateRequested: Date;
+  /** Set by the schema's `timestamps` option. */
+  createdAt: Date;
   updatedAt: Date;
 }
 

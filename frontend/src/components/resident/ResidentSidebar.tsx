@@ -30,6 +30,7 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import SupportAgentIcon from "@mui/icons-material/SupportAgent";
 import GavelIcon from "@mui/icons-material/Gavel";
 import AccessibilityNewIcon from "@mui/icons-material/AccessibilityNew";
+import ManageAccountsIcon from "@mui/icons-material/ManageAccounts";
 import LogoutIcon from "@mui/icons-material/Logout";
 import CloseIcon from "@mui/icons-material/Close";
 import { ResidentProfile, getResidentInitials } from "@/lib/resident";
@@ -111,6 +112,11 @@ const NAV_GROUPS: NavGroup[] = [
     id: "account",
     label: "Account",
     items: [
+      {
+        label: "Account Settings",
+        icon: <ManageAccountsIcon />,
+        href: "/account",
+      },
       {
         label: "Notifications",
         icon: <NotificationsIcon />,

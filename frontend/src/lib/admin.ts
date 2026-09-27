@@ -5,6 +5,57 @@ import { deleteApi, fetchJson, getApi, patchApi, postApi } from "@/lib/api";
  * management pages. These are derived from the backend's list endpoints.
  */
 
+/** Resident account states the backend can store. */
+export type ResidentAccountStatus = "active" | "suspended" | "deactivated";
+
+/**
+ * Chip colours per account status. Deliberately local (rather than the shared
+ * `StatusChip`) so admin-only status colours do not change resident-facing
+ * screens; mirrors the mapping used by the staff page.
+ */
+export const RESIDENT_STATUS_COLORS: Record<
+  ResidentAccountStatus,
+  "success" | "warning" | "error"
+> = {
+  active: "success",
+  suspended: "warning",
+  deactivated: "error",
+};
+
+/**
+ * Deletion states a RESIDENT can put their own account into, derived from the
+ * three backend timestamps. Distinct from `isDeleted`, which is the admin
+ * soft-delete that hides the row from this list entirely.
+ */
+export type ResidentDeletionState = "none" | "pending" | "deleted";
+
+/** Chip colours for the resident-initiated deletion state. */
+export const RESIDENT_DELETION_COLORS: Record<
+  ResidentDeletionState,
+  "default" | "warning" | "error"
+> = {
+  none: "default",
+  pending: "warning",
+  deleted: "error",
+};
+
+/** Which resident-initiated deletion state a record is in. */
+export function residentDeletionState(
+  resident: Pick<
+    ResidentRecord,
+    "deletionRequestedAt" | "deletionFinalizedAt"
+  >,
+): ResidentDeletionState {
+  if (resident.deletionFinalizedAt) return "deleted";
+  return resident.deletionRequestedAt ? "pending" : "none";
+}
+
+/** Human label for a deletion state (chip text and detail-page copy). */
+export function residentDeletionLabel(state: ResidentDeletionState): string {
+  if (state === "deleted") return "Account deleted";
+  return state === "pending" ? "Deletion requested" : "Active";
+}
+
 /** A resident record (fields exposed by the backend's public JSON). */
 export interface ResidentRecord {
   _id?: string;
@@ -21,7 +72,25 @@ export interface ResidentRecord {
   province?: string;
   zipCode?: string;
   profileImageUrl?: string;
-  accountStatus: string;
+  accountStatus: ResidentAccountStatus;
+  /** Admin note recorded with the latest account action. */
+  statusReason?: string;
+  /** Soft-delete flag — deleted residents are hidden from the list. */
+  isDeleted?: boolean;
+  deletedAt?: string;
+  /**
+   * Resident-INITIATED deletion. Unlike `isDeleted` the resident stays visible
+   * here (and can still sign in); only their own view of the records they filed
+   * before `deletionRequestedAt` is hidden, and only their own writes to those
+   * records are blocked. Nothing is removed for staff.
+   */
+  deletionRequestedAt?: string;
+  /** When the 30-day recovery window closes and the deletion becomes permanent. */
+  deletionScheduledFor?: string;
+  /** Set once the deletion is permanent and can no longer be restored. */
+  deletionFinalizedAt?: string;
+  /** The resident's own free-text reason, shown to staff. */
+  deletionReason?: string;
   isProvisioned: boolean;
   createdAt: string;
 }
@@ -231,10 +300,11 @@ export async function fetchResident(id: string): Promise<ResidentRecord | null> 
   }
 }
 
-/** Update a resident's fields via PATCH. */
+/** Update a resident's fields via PATCH. Staff/admin may also change
+ * `accountStatus`, `statusReason`, and the `isDeleted` soft-delete flag. */
 export async function updateResident(
   id: string,
-  body: Partial<ResidentRecord> & { accountStatus?: string },
+  body: Partial<ResidentRecord>,
 ): Promise<ResidentRecord> {
   return patchApi<ResidentRecord>(`residents/${encodeURIComponent(id)}`, body);
 }
@@ -496,16 +566,78 @@ export function compareChatSessionsByRecency(
   );
 }
 
-/** Play a short notification chime via the Web Audio API (no asset file). */
-export function playNotificationSound(): void {
-  if (typeof window === "undefined") return;
+/**
+ * The page's single chime context, created on first use.
+ *
+ * Deliberately SHARED. Browsers cap how many concurrent `AudioContext`s one
+ * document may hold (Chrome ~6, Safari ~4), and this used to build a fresh one
+ * per notification and never close it — so after a handful of alerts the chime
+ * silently stopped for the rest of the session, which is the "the toast appears
+ * but there is no sound" report. One context also gives the autoplay policy a
+ * single thing to resume, instead of a new context that is born suspended.
+ */
+let chimeContext: AudioContext | null = null;
+/** Whether the first-gesture listener below has been installed. */
+let chimeArmed = false;
+
+/** Build a chime context, or null in a browser without Web Audio. */
+function createChimeContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
   const Ctor =
     window.AudioContext ??
     (window as unknown as { webkitAudioContext?: typeof AudioContext })
       .webkitAudioContext;
-  if (!Ctor) return;
-  const ctx = new Ctor();
-  const now = ctx.currentTime;
+  return Ctor ? new Ctor() : null;
+}
+
+/**
+ * Get the chime context, creating it on first use, and ask it to start if the
+ * browser is holding it suspended.
+ *
+ * Safe to call at any time: autoplay policy leaves a context built before the
+ * document has been interacted with `suspended`, and `resume()` is how it is
+ * allowed to start. Without a user gesture the promise simply stays pending
+ * until there is one.
+ */
+function resumeChimeContext(): AudioContext | null {
+  if (!chimeContext) chimeContext = createChimeContext();
+  const ctx = chimeContext;
+  if (ctx && ctx.state === "suspended") void ctx.resume();
+  return ctx;
+}
+
+/**
+ * Bring the chime up on the first user gesture of the page.
+ *
+ * An alert arriving before the admin has clicked anything cannot be heard — the
+ * context is suspended and `resume()` will not resolve yet. Listening once for a
+ * gesture means the console starts chiming as soon as it is touched, rather than
+ * staying mute until some later, unrelated resume happens to uncork it.
+ */
+function armChimeOnFirstGesture(): void {
+  if (chimeArmed || typeof window === "undefined") return;
+  chimeArmed = true;
+  const arm = () => {
+    resumeChimeContext();
+    window.removeEventListener("pointerdown", arm);
+    window.removeEventListener("keydown", arm);
+  };
+  window.addEventListener("pointerdown", arm);
+  window.addEventListener("keydown", arm);
+}
+
+/** Play a short notification chime via the Web Audio API (no asset file). */
+export function playNotificationSound(): void {
+  armChimeOnFirstGesture();
+  const ctx = resumeChimeContext();
+  if (!ctx) return;
+  // A suspended context's clock is frozen, so a tone scheduled now would either
+  // be inaudible or — once the admin finally clicks — fire long after the alert
+  // it was meant to announce. Drop this one; the gesture listener arms the next.
+  if (ctx.state === "suspended") return;
+  // A hair ahead of `currentTime` rather than exactly on it: the clock can be
+  // mid-block, which clips the 20ms attack into an inaudible click.
+  const now = ctx.currentTime + 0.02;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = "sine";

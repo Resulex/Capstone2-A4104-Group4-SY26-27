@@ -19,6 +19,7 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
 import NotificationsIcon from "@mui/icons-material/Notifications";
+import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
 import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -35,6 +36,7 @@ import {
   fetchResidents,
   updateNotification,
 } from "@/lib/admin";
+import { notificationHref } from "@/lib/notification-routes";
 
 /** Human-friendly category labels. */
 const CATEGORY_LABELS: Record<string, string> = {
@@ -90,6 +92,19 @@ function formatDate(iso?: string): string {
   });
 }
 
+/** This page's own route: a notification pointing here has no other record. */
+const NOTIFICATIONS_ROUTE = "/admin/notifications";
+
+/**
+ * Where a row's record lives, or `null` when opening it would only land back on
+ * this page (`systemMessage`, and any category that stops resolving) — in which
+ * case the row shows no button rather than a link to nowhere.
+ */
+function openHrefFor(notification: NotificationRecord): string | null {
+  const href = notificationHref(notification, "admin");
+  return href && href !== NOTIFICATIONS_ROUTE ? href : null;
+}
+
 /**
  * Admin Notifications page — lists all notifications and lets an admin mark
  * them read/unread or delete them.
@@ -105,8 +120,9 @@ export default function NotificationsPage() {
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
   const { profile } = useAdminProfile();
   // The caller's own notification list, shared with the shell's bell: the bulk
-  // action updates both in one optimistic step.
-  const { markAllRead } = useAdminNotifications();
+  // action updates both in one optimistic step, and opening a row clears it there
+  // too so the bell and sidebar badges follow along.
+  const { markAllRead, markNotificationRead } = useAdminNotifications();
 
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [recipientNames, setRecipientNames] = useState<Map<string, string>>(
@@ -191,6 +207,36 @@ export default function NotificationsPage() {
     } finally {
       setPendingId(null);
     }
+  };
+
+  /**
+   * Open the record a notification points at.
+   *
+   * Same resolver as the bell rows and the toasts, so a row here lands on the
+   * same page (incident queue with the history dialog open, document queue, chat
+   * thread) instead of making the admin hunt for the record.
+   *
+   * Opening also marks the row read — that is what opening means everywhere else
+   * in the admin shell (the bell row and the toast both clear the notification as
+   * part of navigating), and the shared context is patched alongside this page's
+   * own copy so the bell drops it in the same step.
+   */
+  const handleOpen = (notification: NotificationRecord) => {
+    const href = openHrefFor(notification);
+    if (!href) return;
+    if (!notification.isRead) {
+      markNotificationRead(
+        notification.notificationId ?? notification._id ?? "",
+      );
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.notificationId === notification.notificationId
+            ? { ...n, isRead: true }
+            : n,
+        ),
+      );
+    }
+    router.push(href);
   };
 
   /**
@@ -363,6 +409,19 @@ export default function NotificationsPage() {
                       </TableCell>
                       <TableCell>
                         <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                          {/* Omitted for rows with no record to open (`systemMessage`),
+                              whose destination is this very page. */}
+                          {openHrefFor(notification) && (
+                            <Button
+                              size="small"
+                              variant="contained"
+                              color="primary"
+                              startIcon={<ArrowForwardIcon />}
+                              onClick={() => handleOpen(notification)}
+                            >
+                              Open
+                            </Button>
+                          )}
                           <Button
                             size="small"
                             variant="outlined"

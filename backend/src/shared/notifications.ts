@@ -4,6 +4,7 @@ import { broadcastToAdmin, broadcastToResident } from './ws';
 // Type-only: `authorization.ts` imports `residentFullName` from this module, so a
 // value import here would close a runtime cycle. Types are erased.
 import type { AdminAssignedRole } from './authorization';
+import { isResidentRecordFrozen } from './resident-deletion';
 
 export type NotifyCategory =
   | 'incidentAlert'
@@ -79,6 +80,28 @@ export async function sendResidentNotification(
     type: 'notification',
     notification: notification.toObject(),
   });
+}
+
+/**
+ * `sendResidentNotification` for a notification about a specific RECORD, muted
+ * once that record belongs to the resident's deleted era.
+ *
+ * A resident who deleted their account must not keep receiving updates about
+ * documents, incidents or chats they can no longer see — otherwise the bell
+ * starts advertising invisible records. Staff keep receiving theirs through
+ * `notifyAllActiveAdmins`, which is deliberately untouched.
+ */
+export async function sendResidentNotificationForRecord(
+  input: NotificationInput & {
+    /** `createdAt` of the document/incident/chat session being notified about. */
+    recordCreatedAt?: Date | string | null;
+  }
+): Promise<void> {
+  const { recordCreatedAt, ...notification } = input;
+  if (await isResidentRecordFrozen(notification.recipientId, recordCreatedAt)) {
+    return;
+  }
+  await sendResidentNotification(notification);
 }
 
 /**

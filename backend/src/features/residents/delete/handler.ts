@@ -4,18 +4,21 @@ import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../..
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { Resident } from '../../../models';
-import { getAuthContext, assertResidentOwnership } from '../../../shared/authorization';
+import { getAuthContext, requireStaffOrAdmin } from '../../../shared/authorization';
 
 /**
- * Residents — Delete
- * Use-case: delete a resident. Residents may only delete their own record.
- * DELETE /residents/{id} (authenticated)
+ * Residents — Delete (soft)
+ * Use-case: soft-delete a resident so it disappears from the Residents list
+ * while the record is retained for history. Staff/admin only.
+ * DELETE /residents/{id} (staff or admin)
  */
 export async function deleteResident(
   event: APIGatewayProxyEvent,
   _context: Context
 ): Promise<APIGatewayProxyResult> {
   const auth = getAuthContext(event);
+  requireStaffOrAdmin(auth);
+
   const id = parsePathParam(event, 'id');
 
   await connectToDatabase();
@@ -25,13 +28,15 @@ export async function deleteResident(
     throw notFoundError('Resident not found.');
   }
 
-  // Residents may only delete their own record.
-  if (auth.role === 'resident') {
-    assertResidentOwnership(auth, resident);
-  }
+  // Soft-delete: archive the record rather than removing it.
+  resident.isDeleted = true;
+  resident.deletedAt = new Date();
+  await resident.save();
 
-  await resident.deleteOne();
-  return ok({ deleted: resident.residentId }, 'Resident deleted.');
+  return ok(
+    { deleted: resident.residentId ?? String(resident._id) },
+    'Resident archived.'
+  );
 }
 
 export const handler = withErrorHandling(deleteResident);

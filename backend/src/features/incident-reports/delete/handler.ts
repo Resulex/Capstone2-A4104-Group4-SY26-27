@@ -7,6 +7,7 @@ import { IncidentReport } from '../../../models';
 import {
   getAuthContext,
   assertOwnResidentRecord,
+  assertResidentRecordWritable,
 } from '../../../shared/authorization';
 
 /**
@@ -30,6 +31,9 @@ export async function deleteIncidentReport(
   }
 
   assertOwnResidentRecord(auth, report.residentId);
+  // A report filed before the resident deleted their account can no longer be
+  // removed by them (staff may still delete it).
+  await assertResidentRecordWritable(auth, report);
   await report.deleteOne();
   return ok({ deleted: report.incidentId }, 'Incident report deleted.');
 }

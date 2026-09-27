@@ -3,7 +3,7 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { Notification, Admin } from '../../../models';
-import { getAuthContext } from '../../../shared/authorization';
+import { getAuthContext, residentDeletionCutoff } from '../../../shared/authorization';
 
 /**
  * Notifications — Mine
@@ -28,7 +28,17 @@ export async function listMyNotifications(
     recipientId = admin ? admin._id : auth.userId;
   }
 
-  const notifications = await Notification.find({ recipientId })
+  const filter: Record<string, unknown> = { recipientId };
+
+  // A resident whose account was deleted stops seeing the notifications that
+  // pointed at their pre-deletion records — otherwise the bell and badge would
+  // keep advertising records the portal no longer shows. Derived from the same
+  // cutoff as the records themselves, so restoring brings them all back.
+  const cutoff = await residentDeletionCutoff(auth);
+  if (cutoff) {
+    filter.$or = [{ createdAt: { $gt: cutoff } }, { createdAt: null }];
+  }
+  const notifications = await Notification.find(filter)
     .sort({ createdAt: -1 })
     .lean();
   return ok(notifications, 'Notifications fetched.');

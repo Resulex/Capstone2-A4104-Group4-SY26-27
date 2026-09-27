@@ -17,6 +17,9 @@ export const SEEDED_INDEXES: Record<string, IndexSpec[]> = {
     { name: 'idx_residents_name', key: { lastName: 1, firstName: 1 } },
     { name: 'idx_residents_purok', key: { streetPurokName: 1 } },
     { name: 'idx_residents_status', key: { accountStatus: 1 } },
+    // Sparse: only resident-initiated deletions carry a date, and the daily
+    // finalization sweep looks up exactly the records that do.
+    { name: 'idx_residents_deletionScheduled', key: { deletionScheduledFor: 1 }, sparse: true },
   ],
   admins: [
     { name: 'unique_adminId', key: { adminId: 1 }, unique: true },

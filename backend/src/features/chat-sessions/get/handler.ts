@@ -4,7 +4,7 @@ import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../..
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { ChatSession } from '../../../models';
-import { getAuthContext, assertOwnResidentRecord } from '../../../shared/authorization';
+import { getAuthContext, assertOwnResidentRecord, assertResidentRecordVisible } from '../../../shared/authorization';
 
 /**
  * Chat Sessions — Get
@@ -29,6 +29,9 @@ export async function getChatSession(
   }
 
   assertOwnResidentRecord(auth, session.residentId);
+  // A session that predates the resident's own account deletion is gone from
+  // their view: same 404 as one that never existed.
+  await assertResidentRecordVisible(auth, session, 'Chat session');
   return ok(session.toObject(), 'Chat session fetched.');
 }
 

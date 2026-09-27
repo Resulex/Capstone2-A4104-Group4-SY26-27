@@ -5,6 +5,7 @@ import { withErrorHandling } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { getAuthContext } from '../../../shared/authorization';
 import { Resident } from '../../../models';
+import { deletionStateOf, syncResidentDeletion } from '../../../shared/resident-deletion';
 
 /**
  * Auth — Session
@@ -41,11 +42,23 @@ export async function getSession(
   // consent sends those residents through `/legal`, matching the existing
   // gate behaviour without logging them out.
   let termsAcceptedAt: string | null = null;
+  // Deletion state is resident-only too; nulls for everyone else so the
+  // frontend never has to branch on the role to read them.
+  let deletion = deletionStateOf(null);
   if (auth.role === 'resident' && mongoose.isValidObjectId(auth.userId)) {
-    const resident = await Resident.findById(auth.userId).select('termsAcceptedAt');
+    const resident = await Resident.findById(auth.userId).select(
+      'termsAcceptedAt deletionRequestedAt deletionScheduledFor deletionFinalizedAt deletionReason'
+    );
     termsAcceptedAt = resident?.termsAcceptedAt
       ? resident.termsAcceptedAt.toISOString()
       : null;
+    if (resident) {
+      // Backstop for the daily EventBridge sweep: `serverless-offline` never
+      // runs `schedule` events, and a deploy can miss a run, so an elapsed
+      // grace window is applied the first time the resident's shell loads.
+      await syncResidentDeletion(resident);
+      deletion = deletionStateOf(resident);
+    }
   }
 
   return ok(
@@ -53,6 +66,7 @@ export async function getSession(
       role: auth.role,
       userId: auth.userId,
       termsAcceptedAt,
+      ...deletion,
     },
     'Session verified.'
   );

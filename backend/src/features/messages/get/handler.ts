@@ -7,19 +7,24 @@ import { Message, ChatSession } from '../../../models';
 import {
   getAuthContext,
   canReadSessionMessages,
+  isResidentRecordHidden,
   type AuthContext,
 } from '../../../shared/authorization';
 
 /**
  * Verifies the caller may read the message's session: residents only their own
  * sessions, admins/officials the whole shared queue (`canReadSessionMessages`).
- * Throws 404 (not found) for non-participants to avoid data leakage.
+ * Throws 404 (not found) for non-participants to avoid data leakage, and for a
+ * session from the resident's own deleted era.
  */
-function assertMessageParticipant(
+async function assertMessageParticipant(
   auth: AuthContext,
-  session: { residentId: unknown }
-): void {
-  if (!canReadSessionMessages(auth, session)) {
+  session: { residentId: unknown; createdAt?: Date | string | null }
+): Promise<void> {
+  if (
+    !canReadSessionMessages(auth, session) ||
+    (await isResidentRecordHidden(auth, session))
+  ) {
     throw notFoundError('Message not found.');
   }
 }
@@ -50,7 +55,7 @@ export async function getMessage(
     throw badRequestError('Message session not found.');
   }
 
-  assertMessageParticipant(auth, session);
+  await assertMessageParticipant(auth, session);
   return ok(message.toObject(), 'Message fetched.');
 }
 
