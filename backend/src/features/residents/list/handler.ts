@@ -20,7 +20,10 @@ export async function listResidents(
 
   await connectToDatabase();
 
-  const query: Record<string, unknown> = {};
+  // Soft-deleted residents are hidden from the list. `$ne: true` (rather than
+  // `false`) keeps records that predate the `isDeleted` field visible without a
+  // backfill migration.
+  const query: Record<string, unknown> = { isDeleted: { $ne: true } };
   if (auth.role === 'official') {
     // Scope to the official's own barangay via their User record.
     const user = await User.findById(auth.userId);

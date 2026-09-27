@@ -7,6 +7,7 @@ import { IncidentReport } from '../../../models';
 import {
   getAuthContext,
   assertOwnResidentRecord,
+  assertResidentRecordVisible,
 } from '../../../shared/authorization';
 
 /**
@@ -31,6 +32,9 @@ export async function getIncidentReport(
   }
 
   assertOwnResidentRecord(auth, report.residentId);
+  // A report that predates the resident's own account deletion is gone from
+  // their view: same 404 as one that never existed.
+  await assertResidentRecordVisible(auth, report, 'Incident report');
   return ok(report.toObject(), 'Incident report fetched.');
 }
 

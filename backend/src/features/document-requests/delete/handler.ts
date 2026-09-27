@@ -7,6 +7,7 @@ import { DocumentRequest } from '../../../models';
 import {
   getAuthContext,
   assertOwnResidentRecord,
+  assertResidentRecordWritable,
 } from '../../../shared/authorization';
 
 /**
@@ -30,6 +31,9 @@ export async function deleteDocumentRequest(
   }
 
   assertOwnResidentRecord(auth, request.residentId);
+  // A request filed before the resident deleted their account can no longer be
+  // removed by them (staff may still delete it).
+  await assertResidentRecordWritable(auth, request);
   await request.deleteOne();
   return ok({ deleted: request.requestId }, 'Document request deleted.');
 }

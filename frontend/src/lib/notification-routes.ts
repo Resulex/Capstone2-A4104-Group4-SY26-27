@@ -11,8 +11,8 @@ export type NotificationScope = "admin" | "resident";
 const SESSION_REF = /^chat[-_]/i;
 /**
  * A Mongo `_id`. Chat notifications written before the switch to the session id
- * carry the referenced incident's `_id` instead, and the incident/document
- * ones can be addressed by `_id` too.
+ * carry the session's `_id` — or the referenced incident's — instead, and the
+ * incident/document ones can be addressed by `_id` too.
  */
 const OBJECT_ID = /^[a-f0-9]{24}$/i;
 
@@ -22,9 +22,11 @@ const OBJECT_ID = /^[a-f0-9]{24}$/i;
  * `referenceUrlId` is prefix-coded by the backend triggers (`INC-…`, `REQ-…`,
  * `chat-…`). The admin queues resolve whatever id they are handed — custom id,
  * Mongo `_id`, or the parent record's id — so the chat case can pass a legacy
- * reference straight through. The resident chat thread, by contrast, is a route
- * parameter, so only a real session id is safe to interpolate there; anything
- * else falls back to the session list instead of a URL that cannot resolve.
+ * reference straight through. The resident chat thread is a route parameter
+ * instead, but it resolves the same shapes against the resident's session list,
+ * so a legacy `_id` reference (`OBJECT_ID`) is still safe to interpolate;
+ * anything else falls back to the session list rather than a URL that cannot
+ * resolve.
  *
  * Returns `null` only when there is nothing to open (never for the categories
  * the backend currently writes).

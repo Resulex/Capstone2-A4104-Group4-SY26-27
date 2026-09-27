@@ -4,7 +4,7 @@ import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } 
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { ChatSession } from '../../../models';
-import { getAuthContext, assertOwnResidentRecord } from '../../../shared/authorization';
+import { getAuthContext, assertOwnResidentRecord, assertResidentRecordWritable } from '../../../shared/authorization';
 
 interface UpdateChatSessionBody {
   isActive?: boolean;
@@ -33,6 +33,9 @@ export async function updateChatSession(
   }
 
   assertOwnResidentRecord(auth, session.residentId);
+  // A session that predates the resident's account deletion is read-only to
+  // them (staff keep replying, so the conversation can be closed out).
+  await assertResidentRecordWritable(auth, session);
 
   const body = parseBody(event) as UpdateChatSessionBody;
   if (body.isActive !== undefined) session.isActive = body.isActive;

@@ -20,6 +20,15 @@ export interface SessionVerification {
   role: string | null;
   termsAcceptedAt: string | null;
   /**
+   * Resident-initiated account deletion state. `deletionScheduledFor` is the
+   * date the grace window closes (the portal banner counts down to it) and
+   * `deletionFinalizedAt` marks the deletion as permanent. Both `null` for
+   * admins, officials, and residents with no pending request.
+   */
+  deletionRequestedAt: string | null;
+  deletionScheduledFor: string | null;
+  deletionFinalizedAt: string | null;
+  /**
    * The backend could not be reached, so validity is UNKNOWN. Callers must not
    * treat this as a rejection — an outage is not a logout.
    */
@@ -31,6 +40,9 @@ const REJECTED: SessionVerification = {
   valid: false,
   role: null,
   termsAcceptedAt: null,
+  deletionRequestedAt: null,
+  deletionScheduledFor: null,
+  deletionFinalizedAt: null,
   unreachable: false,
 };
 
@@ -63,7 +75,15 @@ export async function verifySessionToken(
     return { ...REJECTED, unreachable: true };
   }
 
-  let envelope: { data?: { role?: unknown; termsAcceptedAt?: unknown } };
+  let envelope: {
+    data?: {
+      role?: unknown;
+      termsAcceptedAt?: unknown;
+      deletionRequestedAt?: unknown;
+      deletionScheduledFor?: unknown;
+      deletionFinalizedAt?: unknown;
+    };
+  };
   try {
     envelope = (await upstream.json()) as typeof envelope;
   } catch {
@@ -77,6 +97,10 @@ export async function verifySessionToken(
     return REJECTED;
   }
 
+  /** Deletion fields are always ISO strings or absent — never trust a number. */
+  const isoOrNull = (value: unknown): string | null =>
+    typeof value === "string" ? value : null;
+
   return {
     valid: true,
     role,
@@ -84,6 +108,9 @@ export async function verifySessionToken(
       typeof envelope.data?.termsAcceptedAt === "string"
         ? envelope.data.termsAcceptedAt
         : null,
+    deletionRequestedAt: isoOrNull(envelope.data?.deletionRequestedAt),
+    deletionScheduledFor: isoOrNull(envelope.data?.deletionScheduledFor),
+    deletionFinalizedAt: isoOrNull(envelope.data?.deletionFinalizedAt),
     unreachable: false,
   };
 }

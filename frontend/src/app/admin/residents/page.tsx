@@ -20,11 +20,17 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
 import PeopleIcon from "@mui/icons-material/People";
-import EditIcon from "@mui/icons-material/Edit";
-import BlockIcon from "@mui/icons-material/Block";
-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import VisibilityIcon from "@mui/icons-material/Visibility";
 import { useAuth } from "@/context/AuthContext";
-import { fetchResidents, ResidentRecord, updateResident } from "@/lib/admin";
+import { ResidentActionMenu } from "@/components/admin/ResidentActionMenu";
+import {
+  fetchResidents,
+  RESIDENT_DELETION_COLORS,
+  RESIDENT_STATUS_COLORS,
+  ResidentRecord,
+  residentDeletionLabel,
+  residentDeletionState,
+} from "@/lib/admin";
 
 /** Build a resident's full name from its name fields. */
 function fullName(resident: ResidentRecord): string {
@@ -54,7 +60,6 @@ export default function ResidentsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [pendingId, setPendingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -62,29 +67,17 @@ export default function ResidentsPage() {
     }
   }, [isAuthLoading, isAuthenticated, user, router]);
 
-  const handleToggleStatus = async (resident: ResidentRecord) => {
-    const target = resident.accountStatus === "suspended" ? "active" : "suspended";
-    setPendingId(resident.residentId || resident.emailAddress);
+  /** Apply an action-menu result: replace the row, or drop it when deleted. */
+  const handleResidentUpdated = (updated: ResidentRecord) => {
     setActionError(null);
-    try {
-      const updated = await updateResident(resident.residentId, {
-        accountStatus: target,
-      });
-      setResidents((prev) =>
-        prev.map((r) =>
-          (r.residentId || r.emailAddress) ===
-          (resident.residentId || resident.emailAddress)
-            ? { ...r, accountStatus: updated.accountStatus }
-            : r,
-        ),
-      );
-    } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Failed to update resident status.",
-      );
-    } finally {
-      setPendingId(null);
-    }
+    const key = (record: ResidentRecord) =>
+      record._id ?? record.residentId ?? record.emailAddress;
+    setResidents((prev) => {
+      if (updated.isDeleted) {
+        return prev.filter((r) => key(r) !== key(updated));
+      }
+      return prev.map((r) => (key(r) === key(updated) ? { ...r, ...updated } : r));
+    });
   };
 
   useEffect(() => {
@@ -167,7 +160,14 @@ export default function ResidentsPage() {
                 </TableHead>
                 <TableBody>
                   {residents.map((resident) => (
-                    <TableRow key={resident.residentId || resident.emailAddress} hover>
+                    <TableRow
+                      key={
+                        resident._id ??
+                        resident.residentId ??
+                        resident.emailAddress
+                      }
+                      hover
+                    >
                       <TableCell>
                         <Stack direction="row" alignItems="center" spacing={1.5}>
                           <Avatar
@@ -189,12 +189,40 @@ export default function ResidentsPage() {
                       <TableCell>{resident.contactNumber ?? "—"}</TableCell>
                       <TableCell>{address(resident)}</TableCell>
                       <TableCell>
-                        <Chip
-                          label={resident.accountStatus}
-                          size="small"
-                          color={resident.accountStatus === "active" ? "success" : "error"}
-                          variant="outlined"
-                        />
+                        <Stack
+                          direction="row"
+                          spacing={0.5}
+                          alignItems="center"
+                          flexWrap="wrap"
+                          useFlexGap
+                        >
+                          <Chip
+                            label={resident.accountStatus}
+                            size="small"
+                            color={
+                              RESIDENT_STATUS_COLORS[resident.accountStatus] ??
+                              "default"
+                            }
+                            variant="outlined"
+                          />
+                          {/* Resident-INITIATED deletion. Rendered filled so it
+                              cannot be mistaken for the admin sandbox/states
+                              above; the row stays listed because staff keep
+                              full access to a deleted resident's records. */}
+                          {residentDeletionState(resident) !== "none" && (
+                            <Chip
+                              label={residentDeletionLabel(
+                                residentDeletionState(resident),
+                              )}
+                              size="small"
+                              color={
+                                RESIDENT_DELETION_COLORS[
+                                  residentDeletionState(resident)
+                                ]
+                              }
+                            />
+                          )}
+                        </Stack>
                       </TableCell>
                       <TableCell>
                         <Chip
@@ -205,37 +233,29 @@ export default function ResidentsPage() {
                         />
                       </TableCell>
                       <TableCell>
-                        <Stack direction="row" spacing={1}>
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          alignItems="center"
+                        >
                           <Button
                             size="small"
                             variant="outlined"
-                            startIcon={<EditIcon />}
+                            startIcon={<VisibilityIcon />}
                             onClick={() =>
                               router.push(
-                                `/admin/residents/${encodeURIComponent(resident.residentId)}/edit`,
+                                `/admin/residents/${encodeURIComponent(
+                                  resident._id ?? resident.residentId,
+                                )}`,
                               )
                             }
                           >
-                            Edit
+                            View
                           </Button>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color={resident.accountStatus === "suspended" ? "success" : "error"}
-                            startIcon={
-                              resident.accountStatus === "suspended" ? (
-                                <CheckCircleIcon />
-                              ) : (
-                                <BlockIcon />
-                              )
-                            }
-                            disabled={pendingId === (resident.residentId || resident.emailAddress)}
-                            onClick={() => handleToggleStatus(resident)}
-                          >
-                            {resident.accountStatus === "suspended"
-                              ? "Unsuspend"
-                              : "Suspend"}
-                          </Button>
+                          <ResidentActionMenu
+                            resident={resident}
+                            onUpdated={handleResidentUpdated}
+                          />
                         </Stack>
                       </TableCell>
                     </TableRow>

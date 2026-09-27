@@ -413,18 +413,26 @@ function DocumentRequestsPageContent() {
                         },
                       })}
                     >
-                      {/* Bold while unread — the same signal the resident portal and
-                          the Live Chat queue use. Read rows keep their old weight. */}
+                      {/* Bold while unread — the same signal the Live Chat queue
+                          uses. Read rows fall back to the body weight (400); a
+                          600 here would still read as bold next to the 700. The
+                          applicant name moves with the row, so a read row carries
+                          no semibold text. */}
                       <TableCell
                         sx={{
-                          fontWeight: isDocumentUnread(doc) ? 700 : 600,
+                          fontWeight: isDocumentUnread(doc) ? 700 : 400,
                         }}
                       >
                         {doc.requestId}
                       </TableCell>
                       <TableCell>
                         <Box>
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontWeight: isDocumentUnread(doc) ? 700 : 400,
+                            }}
+                          >
                             {doc.applicantDetails?.fullName ?? "—"}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">

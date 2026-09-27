@@ -515,11 +515,12 @@ function IncidentsPageContent() {
                         },
                       })}
                     >
-                      {/* Bold while unread — the same signal the resident portal and
-                          the Live Chat queue use. Read rows keep their old weight. */}
+                      {/* Bold while unread — the same signal the Live Chat queue
+                          uses. Read rows fall back to the body weight (400); a
+                          600 here would still read as bold next to the 700. */}
                       <TableCell
                         sx={{
-                          fontWeight: isIncidentUnread(incident) ? 700 : 600,
+                          fontWeight: isIncidentUnread(incident) ? 700 : 400,
                         }}
                       >
                         {incident.incidentId}

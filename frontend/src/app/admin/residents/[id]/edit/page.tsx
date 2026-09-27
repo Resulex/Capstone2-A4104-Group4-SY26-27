@@ -28,6 +28,8 @@ export default function EditResidentPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
+  /** Back/cancel/save-return destination: the read-only detail page. */
+  const detailPath = `/admin/residents/${encodeURIComponent(id)}`;
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
 
   const [resident, setResident] = useState<ResidentRecord | null>(null);
@@ -125,7 +127,7 @@ export default function EditResidentPage() {
         houseUnitNumber: form.houseUnitNumber,
         streetPurokName: form.streetPurokName,
       });
-      router.push("/admin/residents");
+      router.push(detailPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save resident.");
       setSaving(false);
@@ -138,7 +140,7 @@ export default function EditResidentPage() {
         <Button
           variant="text"
           startIcon={<ArrowBackIcon />}
-          onClick={() => router.push("/admin/residents")}
+          onClick={() => router.push(detailPath)}
         >
           Back
         </Button>
@@ -278,7 +280,7 @@ export default function EditResidentPage() {
               </Button>
               <Button
                 variant="outlined"
-                onClick={() => router.push("/admin/residents")}
+                onClick={() => router.push(detailPath)}
               >
                 Cancel
               </Button>

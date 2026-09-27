@@ -586,6 +586,46 @@ functions:
             type: REQUEST
             resultTtlInSeconds: 0
             identitySource: method.request.header.Authorization
+  # Resident self-service account deletion (30-day recoverable grace window).
+  # Three path segments, like `residents/me/consent`, so `residents/{id}` can
+  # never shadow them. Resident-only; the handlers act on the caller's own
+  # record via the JWT `sub`.
+  residents-my-deletion-request:
+    handler: src/features/residents/me-deletion/handler.requestHandler
+    events:
+      - http:
+          path: residents/me/deletion
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  residents-my-deletion-get:
+    handler: src/features/residents/me-deletion/handler.getHandler
+    events:
+      - http:
+          path: residents/me/deletion
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  residents-my-deletion-cancel:
+    handler: src/features/residents/me-deletion/handler.cancelHandler
+    events:
+      - http:
+          path: residents/me/deletion
+          method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
   residents-update:
     handler: src/features/residents/update/handler.handler
     events:
@@ -610,6 +650,17 @@ functions:
             type: REQUEST
             resultTtlInSeconds: 0
             identitySource: method.request.header.Authorization
+
+  # Daily backstop that stamps `deletionFinalizedAt` on resident-initiated
+  # deletions whose 30-day grace window has elapsed. The ONLY scheduled function
+  # in the service and the only one with no HTTP event — the resident session
+  # check applies the same finalization lazily, which is what makes this
+  # testable under `serverless-offline` (it does not run `schedule` events).
+  residents-deletion-sweep:
+    handler: src/features/residents/deletion-sweep/handler.handler
+    timeout: 60
+    events:
+      - schedule: rate(1 day)
 
   # ---------------------------------------------------------------------------
   # Admins — CRUD

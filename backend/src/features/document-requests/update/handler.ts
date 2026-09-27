@@ -7,10 +7,11 @@ import { DocumentRequest } from '../../../models';
 import {
   residentFullName,
   notifyAllActiveAdmins,
-  sendResidentNotification,
+  sendResidentNotificationForRecord,
 } from '../../../shared/notifications';
 import {
   assertOwnResidentRecord,
+  assertResidentRecordWritable,
   resolveAuthContext,
   requireStaffOrAdmin,
   actorIdentity,
@@ -46,6 +47,10 @@ export async function updateDocumentRequest(
   }
 
   assertOwnResidentRecord(auth, request.residentId);
+
+  // A request filed before the resident deleted their account is read-only to
+  // them (staff keep full control, so it can still be processed and released).
+  await assertResidentRecordWritable(auth, request);
 
   let statusChanged = false;
 
@@ -116,12 +121,15 @@ export async function updateDocumentRequest(
       referenceUrlId: request.requestId,
     });
 
-    await sendResidentNotification({
+    // Muted for a resident who deleted their account: they can no longer see
+    // this request, so its status must not ping their bell either.
+    await sendResidentNotificationForRecord({
       recipientId: String(request.residentId),
       category: 'documentUpdate',
       titleText: 'Document Request Updated',
       messageBody: `Your document request ${request.requestId} is now ${request.currentStatus}${remarkNote}`,
       referenceUrlId: request.requestId,
+      recordCreatedAt: request.createdAt,
     });
   }
 

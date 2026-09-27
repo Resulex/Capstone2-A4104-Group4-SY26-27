@@ -5,10 +5,10 @@ import { withErrorHandling, parseBody, buildIdOrCustomIdQuery } from '../../../s
 import { created, badRequest } from '../../../shared/responses';
 import { conflictError, badRequestError } from '../../../shared/errors';
 import { Message, ChatSession, Admin, type IChatSession } from '../../../models';
-import { getAuthContext, actorIdentity, CHAT_STAFF_ROLES } from '../../../shared/authorization';
+import { getAuthContext, actorIdentity, assertResidentRecordWritable, CHAT_STAFF_ROLES } from '../../../shared/authorization';
 import {
   notifyAllActiveAdmins,
-  sendResidentNotification,
+  sendResidentNotificationForRecord,
   residentFullName,
   activeAdminIdsByRole,
 } from '../../../shared/notifications';
@@ -63,6 +63,10 @@ export async function createMessage(
     if (auth.userId !== String(session.residentId)) {
       throw badRequestError('You are not a participant of this session.');
     }
+    // A session that predates the resident's account deletion is read-only to
+    // them — staff may still reply to close the conversation out, but the
+    // resident cannot keep chatting in it.
+    await assertResidentRecordWritable(auth, session);
     senderId = String(session.residentId);
     isUser = true;
   } else if (auth.role === 'admin') {
@@ -162,15 +166,23 @@ export async function createMessage(
 
   // Notify the session's resident when the responder replies, over the
   // real-time channel.
+  //
+  // `referenceUrlId` is the session's own id here too — the SAME reference the
+  // admin notification above uses. The resident deep link is the `/chat/{id}`
+  // route parameter, which `messages/search` resolves as a `sessionId` custom id
+  // or the session's `_id`; the linked incident's `_id` (what this used to send)
+  // matches neither, so clicking the notification opened a thread whose first
+  // fetch was rejected as an invalid sessionId.
   if (!isUser && session.residentId) {
-    await sendResidentNotification({
+    // Muted for a resident who deleted their account: they can no longer see
+    // this session, so a staff reply must not ping their bell either.
+    await sendResidentNotificationForRecord({
       recipientId: String(session.residentId),
       category: 'chatMessage',
       titleText: 'New Message from the Barangay',
       messageBody: `The barangay responded in live chat: ${messageText}`,
-      referenceUrlId: session.incidentId
-        ? String(session.incidentId)
-        : String(session._id),
+      referenceUrlId: session.sessionId,
+      recordCreatedAt: session.createdAt,
     });
   }
 

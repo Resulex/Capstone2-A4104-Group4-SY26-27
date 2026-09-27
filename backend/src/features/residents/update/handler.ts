@@ -22,7 +22,11 @@ interface UpdateResidentBody {
   barangayId?: string;
   password?: string;
   profileImageUrl?: string;
-  accountStatus?: 'active' | 'suspended';
+  accountStatus?: 'active' | 'suspended' | 'deactivated';
+  /** Optional admin note explaining the account action (staff/admin only). */
+  statusReason?: string;
+  /** Soft-delete flag (staff/admin only). */
+  isDeleted?: boolean;
   /** Record Terms + Data Privacy consent (resident self-service only). */
   acceptTerms?: boolean;
   termsVersion?: string;
@@ -69,9 +73,19 @@ export async function updateResident(
   if (body.streetPurokName !== undefined) resident.streetPurokName = body.streetPurokName;
   if (body.profileImageUrl !== undefined) resident.profileImageUrl = body.profileImageUrl;
 
-  // Only staff/admin may change account status.
-  if (body.accountStatus !== undefined && auth.role !== 'resident') {
-    resident.accountStatus = body.accountStatus;
+  // Only staff/admin may change account status, the status reason, or the
+  // soft-delete flag. Mirrors the officials update handler's `isDeleted`.
+  if (auth.role !== 'resident') {
+    if (body.accountStatus !== undefined) {
+      resident.accountStatus = body.accountStatus;
+    }
+    if (body.statusReason !== undefined) {
+      resident.statusReason = body.statusReason;
+    }
+    if (body.isDeleted !== undefined) {
+      resident.isDeleted = body.isDeleted;
+      resident.deletedAt = body.isDeleted ? new Date() : undefined;
+    }
   }
 
   // Re-derive read-only address if barangay changes (staff/admin only).

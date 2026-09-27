@@ -55,6 +55,17 @@ export async function login(
   // `_id`; return it so the frontend can populate the full resident profile.
   const resident = await Resident.findById(user.id).select('+passwordHash');
 
+  // A suspended, deactivated, or soft-deleted resident must not sign in. The
+  // Google SSO flow already enforces this; password login previously checked
+  // nothing, so an inactive resident kept full access.
+  if (
+    user.role !== 'admin' &&
+    resident &&
+    (resident.isDeleted || resident.accountStatus !== 'active')
+  ) {
+    throw unauthorizedError('This account is not active.');
+  }
+
   return ok(
     {
       token,

@@ -7,11 +7,12 @@ import { IncidentReport } from '../../../models';
 import {
   residentFullName,
   notifyAllActiveAdmins,
-  sendResidentNotification,
+  sendResidentNotificationForRecord,
 } from '../../../shared/notifications';
 import {
   getAuthContext,
   assertOwnResidentRecord,
+  assertResidentRecordWritable,
   requireStaffOrAdmin,
   actorIdentity,
 } from '../../../shared/authorization';
@@ -49,6 +50,10 @@ export async function updateIncidentReport(
   }
 
   assertOwnResidentRecord(auth, report.residentId);
+
+  // A report filed before the resident deleted their account is read-only to
+  // them (staff keep full control, so it can still be triaged and resolved).
+  await assertResidentRecordWritable(auth, report);
 
   let statusChanged = false;
 
@@ -167,12 +172,15 @@ export async function updateIncidentReport(
       { excludeAdminId: actor?.userId }
     );
 
-    await sendResidentNotification({
+    // Muted for a resident who deleted their account: they can no longer see
+    // this report, so its status must not ping their bell either.
+    await sendResidentNotificationForRecord({
       recipientId: String(report.residentId),
       category: 'incidentAlert',
       titleText: 'Incident Report Updated',
       messageBody: `Your incident report ${report.incidentId} is now ${report.incidentStatus}${duplicateNote}${remarkNote}`,
       referenceUrlId: report.incidentId,
+      recordCreatedAt: report.createdAt,
     });
   }
 

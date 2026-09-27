@@ -21,6 +21,14 @@ interface SessionResponse {
   role: string | null;
   termsAcceptedAt: string | null;
   /**
+   * Resident-initiated account deletion state (null for every other role and
+   * for residents with no pending request). `deletionScheduledFor` drives the
+   * portal's recovery banner; `deletionFinalizedAt` means it is irreversible.
+   */
+  deletionRequestedAt?: string | null;
+  deletionScheduledFor?: string | null;
+  deletionFinalizedAt?: string | null;
+  /**
    * True when the session could not be checked because the backend was
    * unreachable. This is NOT a logout: callers should keep the state they
    * already hold rather than evicting a user over an outage.
@@ -65,5 +73,8 @@ export async function GET(request: NextRequest) {
     authenticated: true,
     role: session.role,
     termsAcceptedAt: session.termsAcceptedAt,
+    deletionRequestedAt: session.deletionRequestedAt,
+    deletionScheduledFor: session.deletionScheduledFor,
+    deletionFinalizedAt: session.deletionFinalizedAt,
   });
 }

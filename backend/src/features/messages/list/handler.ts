@@ -3,7 +3,12 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok, badRequest } from '../../../shared/responses';
 import { Message, ChatSession } from '../../../models';
-import { getAuthContext, canReadSessionMessages } from '../../../shared/authorization';
+import {
+  getAuthContext,
+  canReadSessionMessages,
+  isResidentRecordHidden,
+  residentRecordScopeFilter,
+} from '../../../shared/authorization';
 
 /**
  * Messages — List
@@ -32,7 +37,12 @@ export async function listMessages(
     }
 
     // Access check: residents only their own sessions; staff share the queue.
-    if (!canReadSessionMessages(auth, session)) {
+    // A session from the resident's deleted era is reported exactly like an
+    // unknown id, so the thread cannot be reached by URL either.
+    if (
+      !canReadSessionMessages(auth, session) ||
+      (await isResidentRecordHidden(auth, session))
+    ) {
       return badRequest('You are not a participant of this session.');
     }
     query.sessionId = session._id;
@@ -41,7 +51,11 @@ export async function listMessages(
     // lookup; admins and officials see every message (shared queue / barangay
     // scope).
     if (auth.role === 'resident') {
-      const sessions = await ChatSession.find({ residentId: auth.userId }).select('_id').lean();
+      // Deletion-aware scope: sessions from before the deletion are excluded, so
+      // their messages drop out of an unfiltered search too.
+      const sessions = await ChatSession.find(await residentRecordScopeFilter(auth))
+        .select('_id')
+        .lean();
       query.sessionId = { $in: sessions.map((s) => s._id) };
     }
   }

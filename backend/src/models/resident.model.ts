@@ -1,6 +1,13 @@
 import mongoose, { Schema, type Document, type Model } from 'mongoose';
 
-export type ResidentAccountStatus = 'active' | 'suspended';
+export type ResidentAccountStatus = 'active' | 'suspended' | 'deactivated';
+
+/**
+ * Days a resident-initiated account deletion stays recoverable. During the
+ * window the resident keeps their sign-in but their pre-existing records are
+ * hidden and locked; afterwards the deletion is permanent.
+ */
+export const RESIDENT_DELETION_GRACE_DAYS = 30;
 
 export interface IResident extends Document {
   residentId: string;
@@ -19,10 +26,33 @@ export interface IResident extends Document {
   passwordHash?: string; // optional for Google SSO residents
   profileImageUrl?: string;
   accountStatus: ResidentAccountStatus;
+  /**
+   * Reason an admin supplied for the latest account action (suspend,
+   * deactivate, reactivate, delete). Scalar mirror of the latest action, like
+   * the `remarks` field records keep alongside their timeline.
+   */
+  statusReason?: string;
   // Google SSO identity (used for resident login via Google)
   googleSub?: string; // Google account unique identifier
   googleEmail?: string; // verified Google email
   isProvisioned: boolean; // true once the resident completes first-time onboarding
+  /** Soft-delete flag: hidden from the Residents list, kept for history. */
+  isDeleted: boolean;
+  deletedAt?: Date; // set when the account is soft-deleted
+  /**
+   * Resident-INITIATED deletion request. Deliberately separate from
+   * `isDeleted` (which is the admin soft-delete and blocks sign-in): this one
+   * keeps the resident signed in, keeps the row visible to admins, and only
+   * hides the resident's PRE-EXISTING records from their own portal.
+   *
+   * A record counts as "frozen" for the resident while
+   * `record.createdAt <= deletionRequestedAt` — see
+   * `assertResidentRecordWritable` in `shared/authorization.ts`.
+   */
+  deletionRequestedAt?: Date; // when the resident asked for deletion
+  deletionScheduledFor?: Date; // when the grace window closes (requestedAt + 30d)
+  deletionFinalizedAt?: Date; // set once the deletion became permanent
+  deletionReason?: string; // optional free-text reason the resident gave
   termsAcceptedAt?: Date; // set when the resident agrees to Terms + Data Privacy
   termsVersion?: string; // version of the terms/privacy policy the resident accepted
   createdAt: Date;
@@ -60,9 +90,10 @@ const residentSchema = new Schema<IResident>(
     profileImageUrl: { type: String, trim: true },
     accountStatus: {
       type: String,
-      enum: ['active', 'suspended'],
+      enum: ['active', 'suspended', 'deactivated'],
       default: 'active',
     },
+    statusReason: { type: String, trim: true },
     // Google SSO identity — unique but sparse so manually-created residents
     // without a Google account are unaffected.
     googleSub: {
@@ -74,6 +105,14 @@ const residentSchema = new Schema<IResident>(
     },
     googleEmail: { type: String, lowercase: true, trim: true },
     isProvisioned: { type: Boolean, default: false },
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date },
+    // Resident-initiated deletion. All optional, so existing records read as
+    // "not deleted" without a backfill migration.
+    deletionRequestedAt: { type: Date },
+    deletionScheduledFor: { type: Date },
+    deletionFinalizedAt: { type: Date },
+    deletionReason: { type: String, trim: true },
     termsAcceptedAt: { type: Date },
     termsVersion: { type: String, trim: true },
   },
@@ -82,6 +121,9 @@ const residentSchema = new Schema<IResident>(
 
 residentSchema.index({ lastName: 1, firstName: 1 });
 residentSchema.index({ streetPurokName: 1 });
+// Sparse so the (default-empty) majority of residents are not indexed; used by
+// the daily finalization sweep.
+residentSchema.index({ deletionScheduledFor: 1 }, { sparse: true });
 
 /** Returns a plain object without sensitive fields. */
 residentSchema.methods.toPublicJSON = function () {

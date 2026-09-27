@@ -17,6 +17,9 @@ export interface IChatSession extends Document {
   messageCount: number;
   startedAt: Date;
   lastActivity: Date;
+  /** Set by the schema's `timestamps` option. */
+  createdAt: Date;
+  updatedAt: Date;
   /**
    * When the resident last wrote, i.e. when the queue started waiting.
    *

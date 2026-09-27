@@ -56,6 +56,8 @@ export interface IIncidentReport extends Document {
   /** Original report this one duplicates (`INC-...`), while status is Duplicate. */
   duplicateOfIncidentId?: string;
   reportedAt: Date;
+  /** Set by the schema's `timestamps` option. */
+  createdAt: Date;
   updatedAt: Date;
 }
 

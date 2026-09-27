@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import TextField from "@mui/material/TextField";
 import IconButton from "@mui/material/IconButton";
@@ -9,7 +9,12 @@ import Button from "@mui/material/Button";
 import Alert from "@mui/material/Alert";
 import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import SendIcon from "@mui/icons-material/Send";
-import { ChatMessageRecord, searchMessages, sendMessage } from "@/lib/admin";
+import {
+  chatSessionReferenceKeys,
+  ChatMessageRecord,
+  searchMessages,
+  sendMessage,
+} from "@/lib/admin";
 import { newId } from "@/lib/resident";
 import { useResidentDashboard } from "@/context/ResidentDashboardContext";
 import { ChatBubble } from "@/components/resident/ChatBubble";
@@ -43,8 +48,32 @@ function mergeMessages(
  */
 export default function ChatThreadPage() {
   const params = useParams<{ sessionId: string }>();
-  const sessionId = params.sessionId;
-  const { data, unreadChatKeys, markRecordsRead } = useResidentDashboard();
+  const requestedId = params.sessionId;
+  const router = useRouter();
+  const { data, isLoading, unreadChatKeys, markRecordsRead } =
+    useResidentDashboard();
+
+  /**
+   * The session this link actually names.
+   *
+   * `/chat/{id}` receives whatever `referenceUrlId` the notification carried.
+   * Newer chat notifications store the session's own `chat-…` id, but ones
+   * written before that was standardised store the session's Mongo `_id` — or
+   * the linked INCIDENT's `_id`, which `POST /messages/search` cannot resolve at
+   * all (it matches `sessionId`/`_id` only), so the first fetch was rejected and
+   * the page showed a red "Invalid sessionId." instead of the thread. Matching
+   * against every id a session is addressable by — the same keys the chat list
+   * and the admin queue use — resolves all three shapes.
+   */
+  const session = data.chatSessions.find((candidate) =>
+    chatSessionReferenceKeys(candidate).includes(requestedId),
+  );
+  /**
+   * Canonical route id, used by every request. `undefined` while the shell is
+   * still loading sessions, and after a link that names none of them — in both
+   * cases there is nothing safe to fetch yet.
+   */
+  const sessionId = session?.sessionId;
 
   const [messages, setMessages] = useState<ChatMessageRecord[]>([]);
   const [text, setText] = useState("");
@@ -54,6 +83,7 @@ export default function ChatThreadPage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
+    if (!sessionId) return;
     try {
       const result = await searchMessages(sessionId);
       setMessages((prev) => mergeMessages(prev, result));
@@ -64,12 +94,21 @@ export default function ChatThreadPage() {
     }
   }, [sessionId]);
 
+  // Nothing is fetched until the link resolves, so a legacy reference cannot
+  // produce a doomed request and a spurious error banner.
   useEffect(() => {
+    if (!sessionId) return;
     setLoading(true);
     void load();
     const timer = window.setInterval(() => void load(), 5000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [load, sessionId]);
+
+  // A link naming none of this resident's sessions is a dead end: go back to the
+  // list rather than keep retrying an id that cannot resolve.
+  useEffect(() => {
+    if (!isLoading && !session) router.replace("/chat");
+  }, [isLoading, session, router]);
 
   // Auto-scroll to the newest message.
   useEffect(() => {
@@ -78,21 +117,21 @@ export default function ChatThreadPage() {
 
   // The resident is looking at this thread, so anything unread for the session
   // clears — including replies that arrive while the page is open, because the
-  // shell's push/poll adds the notification and changes `unreadChatKeys`.
-  // Notifications may carry the session id or the incident's Mongo `_id`, so
-  // every id the session is addressable by is accepted.
+  // shell's push/poll adds the notification and changes `unreadChatKeys`. Every
+  // id the session is addressable by is cleared, so a notification carrying a
+  // legacy `_id` reference clears too.
   useEffect(() => {
-    const session = data.chatSessions.find((s) => s.sessionId === sessionId);
     if (!session) return;
-    const keys = [session.sessionId, session._id, session.incidentId].filter(
-      (key): key is string => typeof key === "string" && unreadChatKeys.has(key),
+    const keys = chatSessionReferenceKeys(session).filter((key) =>
+      unreadChatKeys.has(key),
     );
     if (keys.length > 0) markRecordsRead(keys);
-  }, [data.chatSessions, sessionId, unreadChatKeys, markRecordsRead]);
+  }, [session, unreadChatKeys, markRecordsRead]);
 
   /** POST the message and reconcile the optimistic echo with the server copy. */
   const deliver = useCallback(
     async (messageId: string, messageText: string) => {
+      if (!sessionId) return;
       setSending(true);
       try {
         const created = await sendMessage({
@@ -123,7 +162,7 @@ export default function ChatThreadPage() {
 
   const handleSend = async () => {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed || sending || !sessionId) return;
     const messageId = newId();
     // Render the bubble immediately; the response and the 5s poll both merge by
     // `messageId`, so the echo is replaced by the server record rather than
@@ -265,7 +304,7 @@ export default function ChatThreadPage() {
           variant="contained"
           color="primary"
           endIcon={<SendIcon />}
-          disabled={sending || !text.trim()}
+          disabled={sending || !text.trim() || !sessionId}
           sx={{ flexShrink: 0 }}
         >
           Send

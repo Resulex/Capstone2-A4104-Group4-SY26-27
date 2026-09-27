@@ -3,7 +3,7 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { DocumentRequest } from '../../../models';
-import { getAuthContext, residentScopeFilter } from '../../../shared/authorization';
+import { getAuthContext, residentRecordScopeFilter } from '../../../shared/authorization';
 
 /**
  * Document Requests — List
@@ -18,10 +18,10 @@ export async function listDocumentRequests(
   const auth = getAuthContext(event);
   await connectToDatabase();
 
-  const query: Record<string, unknown> = {};
-  if (auth.role === 'resident') {
-    Object.assign(query, residentScopeFilter(auth));
-  }
+  // Residents are scoped to their own records, minus anything that predates a
+  // resident-initiated account deletion (see `residentRecordScopeFilter`).
+  // Admins/officials get an empty filter, i.e. everything.
+  const query = await residentRecordScopeFilter(auth);
 
   const requests = await DocumentRequest.find(query).lean();
   return ok(requests, 'Document requests fetched.');

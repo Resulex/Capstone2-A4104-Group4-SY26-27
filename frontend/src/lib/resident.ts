@@ -1,4 +1,4 @@
-import { getApi, patchApi, postApi } from "@/lib/api";
+import { deleteApi, getApi, patchApi, postApi } from "@/lib/api";
 import {
   AnnouncementRecord,
   ChatSessionRecord,
@@ -190,6 +190,48 @@ export async function acceptResidentTerms(id: string): Promise<ResidentProfile> 
     acceptTerms: true,
     termsVersion: TERMS_VERSION,
   });
+}
+
+/**
+ * Resident-initiated account deletion state, as reported by
+ * `GET /residents/me/deletion` and returned by the request/cancel actions.
+ */
+export interface AccountDeletionState {
+  /** When the resident asked for the deletion (their "deleted era" starts here). */
+  deletionRequestedAt: string | null;
+  /** When the recovery window closes and the deletion becomes permanent. */
+  deletionScheduledFor: string | null;
+  /** Set once the deletion is permanent; nothing can be restored afterwards. */
+  deletionFinalizedAt: string | null;
+  deletionReason: string | null;
+  /** Length of the recovery window in days (server-authoritative). */
+  graceDays: number;
+}
+
+/**
+ * Request permanent deletion of the caller's own account.
+ *
+ * The backend starts a 30-day recovery window: the resident stays signed in,
+ * but their existing documents, incident reports and chats are hidden from them
+ * (and locked against their changes) until either the window elapses or they
+ * restore the account. Admins keep full visibility throughout.
+ */
+export async function requestAccountDeletion(
+  reason?: string,
+): Promise<AccountDeletionState> {
+  return postApi<AccountDeletionState>("residents/me/deletion", {
+    reason: reason?.trim() || undefined,
+  });
+}
+
+/** Restore (cancel) a pending account deletion. Rejected once it is permanent. */
+export async function cancelAccountDeletion(): Promise<AccountDeletionState> {
+  return deleteApi<AccountDeletionState>("residents/me/deletion");
+}
+
+/** Read the caller's own deletion state (never throws for "not deleted"). */
+export async function fetchAccountDeletionState(): Promise<AccountDeletionState> {
+  return getApi<AccountDeletionState>("residents/me/deletion");
 }
 
 /**

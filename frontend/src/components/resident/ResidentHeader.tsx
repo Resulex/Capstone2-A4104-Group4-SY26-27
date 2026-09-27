@@ -138,7 +138,7 @@ export function ResidentHeader({
         <Tooltip title="Account settings">
           <IconButton
             component={Link}
-            href="/settings"
+            href="/account"
             aria-label="Account settings"
             sx={{ p: 0.5 }}
           >

@@ -4,6 +4,7 @@ import { forbiddenError, unauthorizedError, notFoundError } from './errors';
 import { Admin, Resident } from '../models';
 import { connectToDatabase } from '../config/db';
 import { residentFullName } from './notifications';
+import { residentDeletionRequestedAt } from './resident-deletion';
 
 /**
  * RBAC authorization helpers.
@@ -46,6 +47,13 @@ export interface AuthContext {
     assignedRole: AdminAssignedRole;
     accountStatus: string;
   } | null;
+  /**
+   * Per-request cache of the resident's `deletionRequestedAt`, filled on demand
+   * by `residentDeletionCutoff()`. `undefined` = not loaded yet, `null` = loaded
+   * and the resident has no pending deletion. Keeps a document/message handler
+   * from re-reading the Resident for every guard it applies.
+   */
+  residentDeletionCutoff?: Date | null;
 }
 
 /** Reads the authenticated caller identity from the authorizer context. */
@@ -346,6 +354,109 @@ export function residentScopeFilter(
   // The resident's `residentId` (string) is used as their _id elsewhere; here
   // we fall back to matching the residentId string field.
   return { residentId: auth.userId };
+}
+
+/** Guards that the caller is a resident (the resident-only self-service paths). */
+export function requireResident(auth: AuthContext): void {
+  if (auth.role !== 'resident') {
+    throw forbiddenError('This operation is available to residents only.');
+  }
+}
+
+/**
+ * The moment the caller's resident-initiated deletion took effect, or null.
+ *
+ * `null` for admins/officials and for residents with no pending deletion, so
+ * every guard below can treat it as "nothing is frozen".
+ */
+export async function residentDeletionCutoff(
+  auth: AuthContext
+): Promise<Date | null> {
+  if (auth.role !== 'resident') return null;
+  if (auth.residentDeletionCutoff !== undefined) {
+    return auth.residentDeletionCutoff;
+  }
+  await connectToDatabase();
+  const cutoff = await residentDeletionRequestedAt(auth.userId);
+  auth.residentDeletionCutoff = cutoff;
+  return cutoff;
+}
+
+/**
+ * Whether a record is hidden from the CALLER because it predates their
+ * resident-initiated account deletion.
+ *
+ * Boolean rather than throwing, because each handler keeps its own "gone"
+ * contract: the `get` handlers answer 404, while `messages/list` answers the
+ * `Invalid sessionId.` 400 it already uses for outsiders. Admins and officials
+ * are never affected — a request stuck at "Processing" must still be actionable.
+ */
+export async function isResidentRecordHidden(
+  auth: AuthContext,
+  record: { createdAt?: Date | string | null }
+): Promise<boolean> {
+  if (auth.role !== 'resident') return false;
+
+  const cutoff = await residentDeletionCutoff(auth);
+  if (!cutoff) return false;
+
+  const createdAt = record.createdAt ? new Date(record.createdAt).getTime() : null;
+  return createdAt !== null && createdAt <= cutoff.getTime();
+}
+
+/**
+ * Blocks a RESIDENT from changing a record that predates their deletion request.
+ *
+ * Deliberately a no-op for admins and officials: staff must still be able to
+ * release a pending document request, resolve an incident, or reply in a chat
+ * after the resident has walked away.
+ */
+export async function assertResidentRecordWritable(
+  auth: AuthContext,
+  record: { createdAt?: Date | string | null }
+): Promise<void> {
+  if (await isResidentRecordHidden(auth, record)) {
+    throw forbiddenError(
+      'Your account has been deleted, so this record can no longer be changed.'
+    );
+  }
+}
+
+/**
+ * Hides a deleted era's record from a resident, answering with the handler's
+ * own 404 so a hidden record is indistinguishable from one that never existed.
+ */
+export async function assertResidentRecordVisible(
+  auth: AuthContext,
+  record: { createdAt?: Date | string | null },
+  label = 'Record'
+): Promise<void> {
+  if (await isResidentRecordHidden(auth, record)) {
+    throw notFoundError(`${label} not found.`);
+  }
+}
+
+/**
+ * Deletion-aware version of `residentScopeFilter` for resident-owned records.
+ *
+ * Adds an exclusion on `createdAt` so a resident with a pending or finalized
+ * deletion stops seeing the records that existed when they asked. `createdAt:
+ * null` keeps records that predate the `timestamps` option visible, mirroring
+ * the `$ne: true` idiom the Residents list uses for `isDeleted`.
+ */
+export async function residentRecordScopeFilter(
+  auth: AuthContext
+): Promise<Record<string, unknown>> {
+  const scope = residentScopeFilter(auth);
+  if (auth.role !== 'resident') return scope;
+
+  const cutoff = await residentDeletionCutoff(auth);
+  if (!cutoff) return scope;
+
+  return {
+    ...scope,
+    $or: [{ createdAt: { $gt: cutoff } }, { createdAt: null }],
+  };
 }
 
 /** Builds a scope filter for Notification.recipientId. */

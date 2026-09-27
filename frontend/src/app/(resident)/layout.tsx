@@ -2,8 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import Alert from "@mui/material/Alert";
+import AlertTitle from "@mui/material/AlertTitle";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Toolbar from "@mui/material/Toolbar";
+import DeleteForeverIcon from "@mui/icons-material/DeleteForever";
+import RestoreIcon from "@mui/icons-material/Restore";
 import { NotificationToast } from "@/components/shared/NotificationToast";
 import { SessionTimeoutDialog } from "@/components/shared/SessionTimeoutDialog";
 import { ResidentSidebar } from "@/components/resident/ResidentSidebar";
@@ -23,7 +28,12 @@ import {
   playNotificationSound,
 } from "@/lib/admin";
 import { notificationHref } from "@/lib/notification-routes";
-import { countUnread, fetchResidentWsToken } from "@/lib/resident";
+import {
+  cancelAccountDeletion,
+  countUnread,
+  fetchResidentWsToken,
+  formatDisplayDate,
+} from "@/lib/resident";
 import { clearLastActive } from "@/lib/session";
 
 /**
@@ -68,9 +78,10 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
   // The dashboard's hero is full-bleed and starts flush under the header, so
   // the extra top/bottom vertical rhythm is applied only to sub-pages.
   const isDashboard = pathname === "/";
-  const { isAuthenticated, user, logout } = useAuth();
+  const { isAuthenticated, user, logout, refreshSession } = useAuth();
   const { profile, clearProfile } = useResident();
-  const { data, addNotificationLocal, markRecordsRead } = useResidentDashboard();
+  const { data, addNotificationLocal, markRecordsRead, reload } =
+    useResidentDashboard();
 
   const hasConsented = Boolean(user?.termsAcceptedAt);
   const isLegalPage = pathname === "/legal";
@@ -81,6 +92,34 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
   const handleToggleDrawer = () => setExpanded((prev) => !prev);
   const handleMobileClose = () => setMobileOpen(false);
   const handleMobileOpen = () => setMobileOpen(true);
+
+  // ---- Resident-initiated account deletion ----------------------------
+  // A pending deletion keeps the resident signed in (so the window is always
+  // recoverable) but hides their pre-existing records. The banner is the only
+  // place they are reminded about it: this flow deliberately sends no
+  // notification records and no email.
+  const isDeletionPending =
+    Boolean(user?.deletionScheduledFor) && !user?.deletionFinalizedAt;
+  const [restoringAccount, setRestoringAccount] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  const handleRestoreAccount = async () => {
+    setRestoringAccount(true);
+    setRestoreError(null);
+    try {
+      await cancelAccountDeletion();
+      // Re-read the server's dates, then refetch so the records that were hidden
+      // come back on every page without a manual reload.
+      await refreshSession();
+      reload();
+    } catch (err) {
+      setRestoreError(
+        err instanceof Error ? err.message : "Could not restore your account.",
+      );
+    } finally {
+      setRestoringAccount(false);
+    }
+  };
 
   // A resident must accept the Terms + Data Privacy Policy before using the
   // portal; only `/legal` is reachable until they do. Consent comes from the
@@ -251,6 +290,43 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
           {/* Match the fixed header's toolbar height (64px at every breakpoint)
               so page content never tucks underneath it on mobile. */}
           <Toolbar sx={{ minHeight: 64 }} />
+
+          {isDeletionPending && (
+            <Alert
+              severity="warning"
+              icon={<DeleteForeverIcon />}
+              sx={{ mb: 3, borderRadius: 3 }}
+              action={
+                <Button
+                  color="inherit"
+                  size="small"
+                  startIcon={<RestoreIcon />}
+                  onClick={() => void handleRestoreAccount()}
+                  disabled={restoringAccount}
+                  sx={{ whiteSpace: "nowrap" }}
+                >
+                  Restore my account
+                </Button>
+              }
+            >
+              <AlertTitle sx={{ fontWeight: 700 }}>
+                Account scheduled for deletion
+              </AlertTitle>
+              Your account and the document requests, incident reports and chats
+              you filed beforehand will be permanently deleted on{" "}
+              <strong>
+                {formatDisplayDate(user?.deletionScheduledFor ?? undefined)}
+              </strong>
+              . Until then you can restore your account here or from Account
+              Settings.
+              {restoreError && (
+                <Box component="span" sx={{ display: "block", mt: 1 }}>
+                  {restoreError}
+                </Box>
+              )}
+            </Alert>
+          )}
+
           {children}
         </Box>
 
@@ -287,6 +363,7 @@ function getHeaderTitle(pathname: string): string {
   if (pathname.startsWith("/announcements")) return "Announcements";
   if (pathname.startsWith("/officials")) return "Barangay Officials";
   if (pathname.startsWith("/notifications")) return "Notifications";
+  if (pathname.startsWith("/account")) return "Account Settings";
   if (pathname.startsWith("/chat")) return "Live Chat";
   if (pathname.startsWith("/help")) return "Help & Support Center";
   if (pathname.startsWith("/legal")) return "Data Privacy & Terms of Service";

@@ -27,6 +27,16 @@ export interface AuthUser {
    * `/api/auth/me`, which asks the backend — never from a cached profile.
    */
   termsAcceptedAt?: string | null;
+  /**
+   * Resident-initiated account deletion, from the same server-verified session
+   * payload. `deletionScheduledFor` is the day the recovery window closes (the
+   * portal banner counts down to it) and `deletionFinalizedAt` means the
+   * deletion is permanent. Both are `null` for admins, officials, and residents
+   * with no pending request.
+   */
+  deletionRequestedAt?: string | null;
+  deletionScheduledFor?: string | null;
+  deletionFinalizedAt?: string | null;
 }
 
 /** Shape returned by the `/api/auth/me` route handler. */
@@ -34,6 +44,9 @@ interface SessionPayload {
   authenticated: boolean;
   role?: string | null;
   termsAcceptedAt?: string | null;
+  deletionRequestedAt?: string | null;
+  deletionScheduledFor?: string | null;
+  deletionFinalizedAt?: string | null;
 }
 
 /** Roles the app knows how to route. Anything else is not a usable session. */
@@ -143,6 +156,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const nextUser: AuthUser = {
       role,
       termsAcceptedAt: res.termsAcceptedAt ?? null,
+      deletionRequestedAt: res.deletionRequestedAt ?? null,
+      deletionScheduledFor: res.deletionScheduledFor ?? null,
+      deletionFinalizedAt: res.deletionFinalizedAt ?? null,
     };
     applyUser(nextUser);
     return nextUser;
