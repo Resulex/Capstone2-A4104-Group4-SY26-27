@@ -28,21 +28,18 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
+import VisibilityIcon from "@mui/icons-material/Visibility";
 import { useAuth } from "@/context/AuthContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { useAdminProfile } from "@/hooks/useAdminProfile";
+import { AdminActionMenu } from "@/components/admin/AdminActionMenu";
 import {
+  ADMIN_STATUS_COLORS,
   AdminRecord,
   fetchAdmins,
   createAdmin,
 } from "@/lib/admin";
 import { ADMIN_ROLES, ADMIN_ROLE_LABELS, AssignedAdminRole, getAdminLandingPath } from "@/lib/rbac";
-
-const STATUS_COLORS: Record<string, "success" | "warning" | "error" | "default"> = {
-  active: "success",
-  suspended: "warning",
-  deactivated: "error",
-};
 
 interface CreateFormState {
   firstName: string;
@@ -95,6 +92,16 @@ export default function UserManagementPage() {
       setIsLoading(false);
     }
   }, []);
+
+  /** Replace a row after Suspend / Reactivate, matched on the Mongo id. */
+  const handleUpdated = (updated: AdminRecord) => {
+    const key = updated._id ?? updated.adminId;
+    setAdmins((prev) =>
+      prev.map((admin) =>
+        (admin._id ?? admin.adminId) === key ? updated : admin,
+      ),
+    );
+  };
 
   useEffect(() => {
     if (!isAuthLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -185,6 +192,16 @@ export default function UserManagementPage() {
     );
   }
 
+  // The signed-in super admin is deliberately absent from this list: their own
+  // account is managed from /admin/settings, and the backend refuses
+  // self-targeted role/status changes.
+  const selfIds = new Set(
+    [profile?._id, profile?.adminId].filter(Boolean).map(String),
+  );
+  const visibleAdmins = admins.filter(
+    (admin) => !selfIds.has(String(admin._id)) && !selfIds.has(admin.adminId),
+  );
+
   return (
     <Box>
       <Stack
@@ -228,10 +245,11 @@ export default function UserManagementPage() {
                   <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Role</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {admins.map((admin) => (
+                {visibleAdmins.map((admin) => (
                   <TableRow
                     key={admin.adminId}
                     sx={(theme) => ({
@@ -258,12 +276,49 @@ export default function UserManagementPage() {
                       <Chip
                         label={admin.accountStatus}
                         size="small"
-                        color={STATUS_COLORS[admin.accountStatus] ?? "default"}
+                        color={ADMIN_STATUS_COLORS[admin.accountStatus] ?? "default"}
                         variant="outlined"
                       />
                     </TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<VisibilityIcon />}
+                          onClick={() =>
+                            router.push(
+                              `/admin/users/${encodeURIComponent(
+                                admin._id ?? admin.adminId,
+                              )}`,
+                            )
+                          }
+                        >
+                          View
+                        </Button>
+                        <AdminActionMenu
+                          admin={admin}
+                          onUpdated={handleUpdated}
+                          disabled={!isOnline}
+                        />
+                      </Stack>
+                    </TableCell>
                   </TableRow>
                 ))}
+                {visibleAdmins.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center">
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ py: 3 }}
+                      >
+                        No other staff accounts yet. Use “Create Staff” to
+                        provision one.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </TableContainer>

@@ -1,4 +1,5 @@
 import { deleteApi, fetchJson, getApi, patchApi, postApi } from "@/lib/api";
+import type { AssignedAdminRole } from "@/lib/rbac";
 
 /**
  * Data types + fetch helpers for the admin residents and document-request
@@ -260,6 +261,22 @@ export interface ChatMessageRecord {
   failed?: boolean;
 }
 
+/** Admin account states the backend can store. */
+export type AdminAccountStatus = "active" | "suspended" | "deactivated";
+
+/**
+ * Chip colours per admin account status. Deliberately local, for the same
+ * reason as `RESIDENT_STATUS_COLORS` — resident-facing screens must not change.
+ */
+export const ADMIN_STATUS_COLORS: Record<
+  AdminAccountStatus,
+  "success" | "warning" | "error"
+> = {
+  active: "success",
+  suspended: "warning",
+  deactivated: "error",
+};
+
 /** An admin account record (used for recipient resolution and settings). */
 export interface AdminRecord {
   _id?: string;
@@ -269,8 +286,14 @@ export interface AdminRecord {
   middleName?: string;
   userName: string;
   emailAddress: string;
-  assignedRole: string;
-  accountStatus: string;
+  assignedRole: AssignedAdminRole;
+  accountStatus: AdminAccountStatus;
+  /** Optional contact number (stored in Mongo only — never used for MFA). */
+  phoneNumber?: string;
+  /** SUPER_ADMIN note recorded with the latest account action. */
+  statusReason?: string;
+  /** Last successful sign-in. */
+  lastLogin?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -788,6 +811,18 @@ export async function fetchAdmins(): Promise<AdminRecord[]> {
     return await getApi<AdminRecord[]>("admins");
   } catch {
     return [];
+  }
+}
+
+/**
+ * Fetch a single admin account (SUPER_ADMIN-only on the backend). Returns null
+ * when the record is missing, mirroring `fetchResident`.
+ */
+export async function fetchAdmin(id: string): Promise<AdminRecord | null> {
+  try {
+    return await getApi<AdminRecord>(`admins/${encodeURIComponent(id)}`);
+  } catch {
+    return null;
   }
 }
 

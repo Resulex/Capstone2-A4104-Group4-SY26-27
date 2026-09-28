@@ -13,6 +13,12 @@ export interface IAdmin extends Document {
   passwordHash: string;
   assignedRole: AdminRole;
   accountStatus: AdminAccountStatus;
+  /**
+   * SUPER_ADMIN note recorded with the latest account action (Suspend /
+   * Reactivate). Mirrors `Resident.statusReason`; cleared when the account is
+   * reactivated without a fresh note.
+   */
+  statusReason?: string;
   // AWS Cognito link (hybrid auth: pool owns password + software-token TOTP
   // MFA). phoneNumber is an optional contact field — NOT used by MFA.
   phoneNumber?: string;
@@ -69,6 +75,8 @@ const adminSchema = new Schema<IAdmin>(
       enum: ['active', 'suspended', 'deactivated'],
       default: 'active',
     },
+    // Note explaining the latest account action (set by admins/update).
+    statusReason: { type: String, trim: true },
     // AWS Cognito link (hybrid auth: pool owns password + software-token TOTP
     // MFA). phoneNumber is an optional contact field — NOT used by MFA.
     phoneNumber: { type: String, trim: true },

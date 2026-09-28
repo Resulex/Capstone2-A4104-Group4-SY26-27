@@ -2,7 +2,7 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-l
 import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok, badRequest } from '../../../shared/responses';
-import { notFoundError } from '../../../shared/errors';
+import { notFoundError, forbiddenError } from '../../../shared/errors';
 import { hashPassword } from '../../../shared/password';
 import { Admin } from '../../../models';
 import { resolveAuthContext, requireAssignedRole } from '../../../shared/authorization';
@@ -18,6 +18,8 @@ interface UpdateAdminBody {
   phoneNumber?: string;
   assignedRole?: 'SUPER_ADMIN' | 'OPERATIONS_CLERK' | 'INFO_OFFICER';
   accountStatus?: 'active' | 'suspended' | 'deactivated';
+  /** Optional note recorded with the account action (SUPER_ADMIN only). */
+  statusReason?: string;
 }
 
 /**
@@ -41,6 +43,18 @@ export async function updateAdmin(
   }
 
   const body = parseBody(event) as UpdateAdminBody;
+
+  // An admin may not change their OWN role or account status: that would let
+  // them demote or lock themselves out. Name-only self edits stay allowed —
+  // the Settings page saves the signed-in admin's own names through this route.
+  const targetIsSelf =
+    auth.admin?.adminId === admin.adminId || String(admin._id) === auth.userId;
+  if (
+    targetIsSelf &&
+    (body.assignedRole !== undefined || body.accountStatus !== undefined)
+  ) {
+    throw forbiddenError('You cannot change your own role or account status.');
+  }
 
   // Top-tier guard for role/status changes and attribute edits that affect
   // other admins. A top-tier Admin can update anyone.
@@ -73,6 +87,12 @@ export async function updateAdmin(
   if (body.phoneNumber !== undefined) admin.phoneNumber = body.phoneNumber.trim();
   if (body.assignedRole !== undefined) admin.assignedRole = body.assignedRole;
   if (body.accountStatus !== undefined) admin.accountStatus = body.accountStatus;
+  if (body.statusReason !== undefined) admin.statusReason = body.statusReason;
+  // The note mirrors the LATEST account action, so reactivating without a new
+  // note clears the one recorded when the account was suspended.
+  if (body.accountStatus === 'active' && body.statusReason === undefined) {
+    admin.statusReason = undefined;
+  }
   if (body.password !== undefined) {
     admin.passwordHash = await hashPassword(body.password);
   }
