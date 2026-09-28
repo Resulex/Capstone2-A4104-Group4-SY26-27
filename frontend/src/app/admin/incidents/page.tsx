@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -9,6 +10,7 @@ import CardContent from "@mui/material/CardContent";
 import CircularProgress from "@mui/material/CircularProgress";
 import Alert from "@mui/material/Alert";
 import Snackbar from "@mui/material/Snackbar";
+import Skeleton from "@mui/material/Skeleton";
 import Chip from "@mui/material/Chip";
 import Stack from "@mui/material/Stack";
 import FormControl from "@mui/material/FormControl";
@@ -52,7 +54,19 @@ import {
   incidentReferenceKeys,
   updateIncidentReport,
 } from "@/lib/admin";
+import { coordinatesFrom } from "@/lib/geo";
 import { isImageUrl } from "@/lib/uploads";
+
+/**
+ * Banner map: the same keyless Leaflet/OpenStreetMap base the resident incident
+ * pages use. Loaded with `ssr: false` because Leaflet reads `window` while its
+ * module is evaluated, which fails during the App Router's server render. This
+ * page is a client component, so that wrapper is allowed.
+ */
+const IncidentMap = dynamic(() => import("@/components/shared/IncidentMap"), {
+  ssr: false,
+  loading: () => <Skeleton variant="rounded" height={400} />,
+});
 
 /** Allowed incident statuses (match backend enums). */
 const INCIDENT_STATUSES = [
@@ -196,6 +210,43 @@ function IncidentsPageContent() {
   /** Report whose status history is open in the dialog. */
   const [historyIncident, setHistoryIncident] = useState<IncidentRecord | null>(
     null,
+  );
+  /**
+   * Report singled out by a Location-cell hover: the banner map narrows to that
+   * one pin while the pointer rests on the row. `null` shows every pin again.
+   */
+  const [hoveredIncident, setHoveredIncident] = useState<IncidentRecord | null>(
+    null,
+  );
+
+  /**
+   * Pins for the banner map, derived from the SAME filters the table applies so
+   * the two views cannot disagree.
+   *
+   * "All Statuses" keeps the command-center default of live reports only — a
+   * settled Closed/Duplicate report is not something to keep on the response map
+   * — while explicitly filtering to a terminal status does pin it, because that
+   * is then the question the admin asked. Reports filed before the map picker
+   * existed carry no coordinates and are dropped; the table still lists them.
+   *
+   * Declared with the other hooks (above the auth early-return) because a hook
+   * after a conditional return breaks the hook order on re-render.
+   */
+  const mapIncidents = useMemo(
+    () =>
+      incidents
+        .filter(
+          (incident) =>
+            !unreadOnly ||
+            hasUnreadReference(unreadIncidentIds, incidentReferenceKeys(incident)),
+        )
+        .filter((incident) =>
+          statusFilter === "all"
+            ? !TERMINAL_STATUSES.includes(incident.incidentStatus)
+            : incident.incidentStatus === statusFilter,
+        )
+        .filter((incident) => coordinatesFrom(incident) !== null),
+    [incidents, unreadOnly, statusFilter, unreadIncidentIds],
   );
 
   useEffect(() => {
@@ -396,16 +447,14 @@ function IncidentsPageContent() {
         </Alert>
       )}
 
+      {/* Live response map: one priority-coloured pin per report in the current
+          filter. The old Google-Maps iframe could only ever show the barangay
+          hall at a fixed centre. */}
       <Box sx={{ mb: 3 }}>
-        <iframe
-          title="Incident map"
-          src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3867.1306425672137!2d121.3657976750994!3d14.245600386199767!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397e31b57a6e0ed%3A0x829e8c8c1bc06bb4!2sLabuin%20Barangay%20Hall!5e0!3m2!1sen!2sph!4v1787824333644!5m2!1sen!2sph"
-          width="100%"
-          height="400"
-          style={{ border: 0, borderRadius: 12, width: "100%", display: "block" }}
-          allowFullScreen
-          loading="lazy"
-          referrerPolicy="strict-origin-when-cross-origin"
+        <IncidentMap
+          incidents={mapIncidents}
+          focusIncident={hoveredIncident}
+          height={400}
         />
       </Box>
 
@@ -546,14 +595,35 @@ function IncidentsPageContent() {
                       <TableCell>
                         {reporterNames.get(incident.residentId) ?? "Unknown"}
                       </TableCell>
-                      <TableCell>
-                        <Typography
-                          variant="body2"
-                          noWrap
-                          sx={{ maxWidth: 220 }}
+                      {/* Hovering the cell narrows the banner map to this row's
+                          pin (see `hoveredIncident`), so the admin can place a
+                          report on the map without leaving the queue. Reports
+                          with no pin get a tooltip saying so instead. */}
+                      <TableCell
+                        onMouseEnter={() =>
+                          setHoveredIncident(
+                            coordinatesFrom(incident) ? incident : null,
+                          )
+                        }
+                        onMouseLeave={() => setHoveredIncident(null)}
+                      >
+                        <Tooltip
+                          title="No pinned location for this report."
+                          disableHoverListener={Boolean(
+                            coordinatesFrom(incident),
+                          )}
+                          disableFocusListener={Boolean(
+                            coordinatesFrom(incident),
+                          )}
                         >
-                          {incident.locationDetails || "—"}
-                        </Typography>
+                          <Typography
+                            variant="body2"
+                            noWrap
+                            sx={{ maxWidth: 220 }}
+                          >
+                            {incident.locationDetails || "—"}
+                          </Typography>
+                        </Tooltip>
                       </TableCell>
                       <TableCell>
                         {incident.evidenceMediaUrls?.length ? (

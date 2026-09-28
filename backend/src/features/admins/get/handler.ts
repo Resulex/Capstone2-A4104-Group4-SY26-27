@@ -4,26 +4,25 @@ import { withErrorHandling, parsePathParam, buildIdOrCustomIdQuery } from '../..
 import { ok } from '../../../shared/responses';
 import { notFoundError } from '../../../shared/errors';
 import { Admin } from '../../../models';
-import { getAuthContext, requireAdmin } from '../../../shared/authorization';
+import { resolveAuthContext, requireSuperAdmin } from '../../../shared/authorization';
 
 /**
  * Admins — Get
- * Use-case: fetch a single administrator. Admin role only.
- * GET /admins/{id} (admin)
+ * Use-case: fetch a single administrator. SUPER_ADMIN only — this powers the
+ * User Management detail page, which only super admins may open.
+ * GET /admins/{id} (admin, assignedRole = SUPER_ADMIN)
  */
 export async function getAdmin(
   event: APIGatewayProxyEvent,
   _context: Context
 ): Promise<APIGatewayProxyResult> {
-  const auth = getAuthContext(event);
-  requireAdmin(auth);
+  const auth = await resolveAuthContext(event);
+  requireSuperAdmin(auth);
 
   const id = parsePathParam(event, 'id');
   await connectToDatabase();
 
-  const admin = await Admin.findOne(
-    buildIdOrCustomIdQuery(id, 'adminId')
-  ).select('+passwordHash');
+  const admin = await Admin.findOne(buildIdOrCustomIdQuery(id, 'adminId'));
 
   if (!admin) {
     throw notFoundError('Admin not found.');

@@ -19,14 +19,18 @@ export async function listAdmins(
 
   await connectToDatabase();
 
-  const admins = await Admin.find().lean();
-  const publicList = admins.map((a) => {
-    // Destructured purely to omit the hash; the binding is intentionally unused.
-    const { passwordHash: _passwordHash, ...rest } = a as unknown as Record<string, unknown>;
-    return rest;
-  });
+  // Project the same public shape as `Admin.toPublicJSON()`: `.lean()` bypasses
+  // that method, so without an explicit projection the internal Cognito / MFA /
+  // password-reset-link fields would be sent to every admin client.
+  const admins = await Admin.find()
+    .select(
+      '-passwordHash -cognitoSub -mfaEnrolled -totpSecret -backupCodes ' +
+        '-passwordResetTokenHash -passwordResetExpiresAt -passwordResetRequestedAt ' +
+        '-mustChangePassword'
+    )
+    .lean();
 
-  return ok(publicList, 'Admins fetched.');
+  return ok(admins, 'Admins fetched.');
 }
 
 export const handler = withErrorHandling(listAdmins);

@@ -41,6 +41,14 @@ const ROLE_ALLOWED_PREFIXES: Record<
 
 const USER_MANAGEMENT_PATH = "/admin/users";
 
+/** User Management and every page nested under it (`[id]`, `[id]/edit`). */
+function isUserManagementPath(pathname: string): boolean {
+  return (
+    pathname === USER_MANAGEMENT_PATH ||
+    pathname.startsWith(`${USER_MANAGEMENT_PATH}/`)
+  );
+}
+
 /**
  * Read-only legal copy. Every admin role may open it — the policy applies to
  * them regardless of what else they are allowed to manage.
@@ -99,7 +107,7 @@ export function canAccessAdminRoute(
   pathname: string,
 ): boolean {
   if (!role || role === "SUPER_ADMIN") return true;
-  if (pathname === USER_MANAGEMENT_PATH) return false;
+  if (isUserManagementPath(pathname)) return false;
   if (pathname === ADMIN_DASHBOARD_PATH) return true;
   if (pathname === ADMIN_LEGAL_PATH) return true;
   const prefixes =
@@ -124,7 +132,7 @@ export function canViewNavItem(
 ): boolean {
   if (!role) return false;
   if (role === "SUPER_ADMIN") return true;
-  if (href === USER_MANAGEMENT_PATH) return false;
+  if (isUserManagementPath(href)) return false;
   // The Dashboard entry only exists for roles that have a dashboard.
   if (href === ADMIN_DASHBOARD_PATH) return canViewAdminDashboard(role);
   if (href === ADMIN_LEGAL_PATH) return true;
