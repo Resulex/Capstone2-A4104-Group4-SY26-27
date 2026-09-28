@@ -16,6 +16,12 @@ import {
   coordinatesFrom,
   type BarangayArea,
 } from "@/lib/geo";
+import {
+  PIN_ICON_ANCHOR,
+  PIN_ICON_SIZE,
+  pinSvg,
+  priorityColorKey,
+} from "@/lib/incident-pins";
 
 export interface IncidentMapProps {
   /**
@@ -34,16 +40,6 @@ export interface IncidentMapProps {
   /** Map height in pixels. */
   height?: number;
 }
-
-/** Theme palette colour backing each triage priority (mirrors the priority Chip). */
-type PriorityPaletteKey = "error" | "warning" | "info" | "success";
-
-const PRIORITY_PALETTE: Record<string, PriorityPaletteKey> = {
-  Critical: "error",
-  High: "warning",
-  Medium: "info",
-  Low: "success",
-};
 
 /** Pin hover text: `[INC-00007] - Flood (Sep 28, 2026, 3:45 PM)`. */
 function pinLabel(incident: IncidentRecord): string {
@@ -82,22 +78,6 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-/**
- * Inline-SVG teardrop, the same shape `LocationPicker` uses (Leaflet's bundled
- * default icon resolves its PNGs relative to the stylesheet and breaks under a
- * bundler), tinted with the priority colour. `color` comes from the theme
- * palette, never from user input.
- */
-function pinSvg(color: string): string {
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="38" height="38" ` +
-    `style="filter:drop-shadow(0 2px 3px rgba(0,0,0,0.35))">` +
-    `<path fill="${color}" fill-rule="evenodd" stroke="#ffffff" stroke-width="1" ` +
-    `d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>` +
-    `</svg>`
-  );
 }
 
 /**
@@ -234,17 +214,15 @@ export default function IncidentMap({
       const pin = coordinatesFrom(incident);
       if (!pin) continue;
 
-      const color =
-        palette[PRIORITY_PALETTE[incident.triagePriority] ?? "success"].main;
+      const color = palette[priorityColorKey(incident.triagePriority)].main;
       const label = pinLabel(incident);
 
       const marker = L.marker([pin.latitude, pin.longitude], {
         icon: L.divIcon({
           className: "",
           html: pinSvg(color),
-          iconSize: [38, 38],
-          // Tip of the teardrop, so the pin points at the coordinate itself.
-          iconAnchor: [19, 37],
+          iconSize: PIN_ICON_SIZE,
+          iconAnchor: PIN_ICON_ANCHOR,
         }),
         // Screen-reader/keyboard label; the tooltip is the visible affordance.
         alt: label,

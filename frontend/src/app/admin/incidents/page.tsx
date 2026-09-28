@@ -33,6 +33,7 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
+import Popover from "@mui/material/Popover";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
@@ -67,6 +68,22 @@ const IncidentMap = dynamic(() => import("@/components/shared/IncidentMap"), {
   ssr: false,
   loading: () => <Skeleton variant="rounded" height={400} />,
 });
+
+/**
+ * Mini map inside the Location-cell hover popup. Its own `ssr: false` chunk for
+ * the same reason as `IncidentMap`: Leaflet needs `window` at module scope.
+ */
+const IncidentLocationPreview = dynamic(
+  () => import("@/components/shared/IncidentLocationPreview"),
+  { ssr: false },
+);
+
+/**
+ * Settle time before a Location-cell hover opens the popup. Sweeping the pointer
+ * down the queue would otherwise build and tear down a Leaflet map for every row
+ * it crosses.
+ */
+const LOCATION_PREVIEW_DELAY_MS = 150;
 
 /** Allowed incident statuses (match backend enums). */
 const INCIDENT_STATUSES = [
@@ -212,12 +229,20 @@ function IncidentsPageContent() {
     null,
   );
   /**
-   * Report singled out by a Location-cell hover: the banner map narrows to that
-   * one pin while the pointer rests on the row. `null` shows every pin again.
+   * Location-cell hover: the banner map narrows to that report AND a mini map
+   * opens under the cell, so the pin is visible without scrolling back up to the
+   * banner. `anchorEl` is the cell itself, which is what positions the popup.
    */
-  const [hoveredIncident, setHoveredIncident] = useState<IncidentRecord | null>(
-    null,
-  );
+  const [hoveredLocation, setHoveredLocation] = useState<{
+    anchorEl: HTMLElement;
+    incident: IncidentRecord;
+  } | null>(null);
+  /**
+   * Pending hover-open timer. The hover is delayed before it opens anything, so
+   * sweeping the pointer down the queue does not build and tear down a Leaflet
+   * map per row (see `LOCATION_PREVIEW_DELAY_MS`).
+   */
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /**
    * Pins for the banner map, derived from the SAME filters the table applies so
@@ -329,6 +354,34 @@ function IncidentsPageContent() {
       : [];
     if (keys.length > 0) markRecordsRead(keys);
   }, [statusModal, unreadIncidentIds, markRecordsRead]);
+
+  /** Opens the Location-cell hover popup, after a short settle delay. */
+  const openLocationPreview = (
+    incident: IncidentRecord,
+    anchorEl: HTMLElement,
+  ) => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(
+      () => setHoveredLocation({ incident, anchorEl }),
+      LOCATION_PREVIEW_DELAY_MS,
+    );
+  };
+
+  const closeLocationPreview = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setHoveredLocation(null);
+  };
+
+  // A pending hover timer must not outlive the page.
+  useEffect(
+    () => () => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    },
+    [],
+  );
 
   /** Opens the confirmation modal for a status change (never fires directly). */
   const openStatusModal = (incident: IncidentRecord, newStatus: string) => {
@@ -453,7 +506,7 @@ function IncidentsPageContent() {
       <Box sx={{ mb: 3 }}>
         <IncidentMap
           incidents={mapIncidents}
-          focusIncident={hoveredIncident}
+          focusIncident={hoveredLocation?.incident ?? null}
           height={400}
         />
       </Box>
@@ -596,16 +649,17 @@ function IncidentsPageContent() {
                         {reporterNames.get(incident.residentId) ?? "Unknown"}
                       </TableCell>
                       {/* Hovering the cell narrows the banner map to this row's
-                          pin (see `hoveredIncident`), so the admin can place a
-                          report on the map without leaving the queue. Reports
-                          with no pin get a tooltip saying so instead. */}
+                          pin AND opens a mini map under the cell (see
+                          `hoveredLocation`), so the pin is visible without
+                          scrolling back up to the banner. Reports with no pin
+                          get a tooltip saying so instead. */}
                       <TableCell
-                        onMouseEnter={() =>
-                          setHoveredIncident(
-                            coordinatesFrom(incident) ? incident : null,
-                          )
-                        }
-                        onMouseLeave={() => setHoveredIncident(null)}
+                        onMouseEnter={(event) => {
+                          if (coordinatesFrom(incident)) {
+                            openLocationPreview(incident, event.currentTarget);
+                          }
+                        }}
+                        onMouseLeave={closeLocationPreview}
                       >
                         <Tooltip
                           title="No pinned location for this report."
@@ -854,6 +908,34 @@ function IncidentsPageContent() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/*
+        Location preview. `pointerEvents: "none"` (set on the root, inherited by
+        the paper) is what makes a hover-opened popup work: the cursor stays "on"
+        the cell that opened it, so the popup cannot steal its own hover, cancel
+        the mouseleave, or swallow a click on the row underneath.
+      */}
+      <Popover
+        open={Boolean(hoveredLocation)}
+        anchorEl={hoveredLocation?.anchorEl ?? null}
+        onClose={closeLocationPreview}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        transformOrigin={{ vertical: "top", horizontal: "center" }}
+        disableAutoFocus
+        disableEnforceFocus
+        disableRestoreFocus
+        disableScrollLock
+        sx={{ pointerEvents: "none" }}
+      >
+        {hoveredLocation && (
+          <Box sx={{ p: 1 }}>
+            <IncidentLocationPreview
+              key={hoveredLocation.incident.incidentId}
+              incident={hoveredLocation.incident}
+            />
+          </Box>
+        )}
+      </Popover>
 
       <Snackbar
         open={Boolean(actionSuccess)}
