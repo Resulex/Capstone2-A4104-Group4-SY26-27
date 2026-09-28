@@ -8,6 +8,10 @@ export interface SeedBarangay {
   province: string;
   region: string;
   zipCode: string;
+  /** Barangay hall / town center (WGS84 decimal degrees). */
+  center: { latitude: number; longitude: number };
+  /** Box used to clamp the incident location picker to the barangay. */
+  bounds: { north: number; south: number; east: number; west: number };
 }
 
 export interface SeedAdmin {
@@ -62,12 +66,23 @@ export interface SeedAnnouncement {
 }
 
 // One barangay for the whole system (city/province/zip read-only defaults).
+//
+// `center` and `bounds` are the real OSM extent of Barangay Labuin, Pila,
+// Laguna (OSM relation 17242188): roughly 1.44 km x 1.53 km, about 2.2 km2.
+// The bounds are what keep the incident map picker inside the barangay.
 export const BARANGAY: SeedBarangay = {
   name: 'Purok 2, Barangay Labuin',
   city: 'Pila',
   province: 'Laguna',
   region: 'CALABARZON',
   zipCode: '4010',
+  center: { latitude: 14.24459, longitude: 121.3694078 },
+  bounds: {
+    north: 14.2522804,
+    south: 14.2393353,
+    east: 121.3750758,
+    west: 121.3608884,
+  },
 };
 
 // Admins: keys are used to reference authorId.
@@ -409,6 +424,9 @@ export interface SeedIncident {
     | 'Other';
   descriptionText: string;
   locationDetails: string;
+  /** Approximate map pin for the seeded report (WGS84 decimal degrees). */
+  latitude: number;
+  longitude: number;
   triagePriority: 'Critical' | 'High' | 'Medium' | 'Low';
   evidenceMediaUrls: string[];
   incidentStatus: 'Pending' | 'Responding' | 'Resolved' | 'Closed' | 'Duplicate';
@@ -423,6 +441,8 @@ export const INCIDENTS: SeedIncident[] = [
     descriptionText:
       'A grassfire broke out in the empty lot along Purok 1 near the creek. Flames are spreading quickly and threaten nearby houses.',
     locationDetails: 'Empty lot along Purok 1, near the creek',
+    latitude: 14.2471,
+    longitude: 121.3652,
     triagePriority: 'Critical',
     evidenceMediaUrls: [
       'https://s3.region.example.com/kbc/evidence/INC-202600001-photo1.jpg',
@@ -438,6 +458,8 @@ export const INCIDENTS: SeedIncident[] = [
     descriptionText:
       'Rising floodwater in Purok 4 has reached waist-deep level after heavy rain. Some elderly residents are stranded in their homes.',
     locationDetails: 'Low-lying area of Purok 4',
+    latitude: 14.2418,
+    longitude: 121.3721,
     triagePriority: 'High',
     evidenceMediaUrls: [
       'https://s3.region.example.com/kbc/evidence/INC-202600002-photo1.jpg',
@@ -452,6 +474,8 @@ export const INCIDENTS: SeedIncident[] = [
     descriptionText:
       'An elderly resident collapsed and is unresponsive. May need an ambulance and immediate first aid.',
     locationDetails: 'House 12, Purok 3',
+    latitude: 14.2455,
+    longitude: 121.3713,
     triagePriority: 'Critical',
     evidenceMediaUrls: [],
     incidentStatus: 'Pending',
@@ -464,6 +488,8 @@ export const INCIDENTS: SeedIncident[] = [
     descriptionText:
       'A motorcycle and a tricycle collided at the corner of Purok 2 road. No serious injuries reported but traffic is blocked.',
     locationDetails: 'Corner of Purok 2 road and national highway',
+    latitude: 14.2438,
+    longitude: 121.3688,
     triagePriority: 'Medium',
     evidenceMediaUrls: [
       'https://s3.region.example.com/kbc/evidence/INC-202600004-photo1.jpg',
@@ -478,6 +504,8 @@ export const INCIDENTS: SeedIncident[] = [
     descriptionText:
       'Suspicious individuals were seen loitering near the store in Purok 2. A resident reported a possible attempt of theft.',
     locationDetails: 'Corner store, Purok 2',
+    latitude: 14.2441,
+    longitude: 121.3695,
     triagePriority: 'Medium',
     evidenceMediaUrls: [
       'https://s3.region.example.com/kbc/evidence/INC-202600005-photo1.jpg',
@@ -492,6 +520,8 @@ export const INCIDENTS: SeedIncident[] = [
     descriptionText:
       'A heated argument between neighbors escalated into a physical altercation on the street. Tanod intervention requested.',
     locationDetails: 'Street in Purok 3',
+    latitude: 14.2462,
+    longitude: 121.3705,
     triagePriority: 'High',
     evidenceMediaUrls: [],
     incidentStatus: 'Closed',

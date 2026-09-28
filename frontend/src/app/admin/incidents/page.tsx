@@ -63,8 +63,14 @@ const INCIDENT_STATUSES = [
   "Duplicate",
 ] as const;
 
-/** Statuses that cannot be recorded without an explanatory remark. */
+/** Statuses that cannot be recorded without an explanatory remark (see TERMINAL_STATUSES). */
 const REMARK_REQUIRED_STATUSES = ["Closed", "Duplicate"];
+
+/**
+ * Terminal statuses: a Closed or Duplicate report is settled, so those rows sink
+ * below the incidents that still need a response in the command-center sort.
+ */
+const TERMINAL_STATUSES = ["Closed", "Duplicate"];
 
 /** Priority rank for the command-center sort (highest urgency first). */
 const PRIORITY_RANK: Record<string, number> = {
@@ -74,11 +80,21 @@ const PRIORITY_RANK: Record<string, number> = {
   Low: 3,
 };
 
+/** Sort tier: 0 for incidents still needing attention, 1 for terminal ones. */
+function terminalRank(status: string): number {
+  return TERMINAL_STATUSES.includes(status) ? 1 : 0;
+}
+
 /**
- * Command-center ordering: primarily by priority (HIGH first), with the most
- * recently reported incident first within the same priority level.
+ * Command-center ordering: incidents still needing attention come first, then
+ * the terminal statuses (Closed/Duplicate). Within each tier, rows are ordered
+ * by priority (HIGH first), with the most recently reported incident first
+ * within the same priority level.
  */
 function compareIncidents(a: IncidentRecord, b: IncidentRecord): number {
+  const terminalDiff =
+    terminalRank(a.incidentStatus) - terminalRank(b.incidentStatus);
+  if (terminalDiff !== 0) return terminalDiff;
   const rankDiff =
     (PRIORITY_RANK[a.triagePriority] ?? 99) -
     (PRIORITY_RANK[b.triagePriority] ?? 99);
@@ -355,7 +371,8 @@ function IncidentsPageContent() {
     .sort(compareIncidents);
 
   // Candidate originals for the duplicate picker: every other report, drawn
-  // from the FULL list so a status filter never hides a valid choice.
+  // from the FULL list so a status filter never hides a valid choice. Reuses the
+  // command-center order, so Closed/Duplicate candidates sort last.
   const duplicateOptions = statusModal
     ? incidents
         .filter((i) => i.incidentId !== statusModal.incident.incidentId)

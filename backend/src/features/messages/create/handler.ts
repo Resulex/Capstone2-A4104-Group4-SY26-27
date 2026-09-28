@@ -6,6 +6,7 @@ import { created, badRequest } from '../../../shared/responses';
 import { conflictError, badRequestError } from '../../../shared/errors';
 import { Message, ChatSession, Admin, type IChatSession } from '../../../models';
 import { getAuthContext, actorIdentity, assertResidentRecordWritable, CHAT_STAFF_ROLES } from '../../../shared/authorization';
+import { sessionHasStaffMessage } from '../../../shared/chat-sessions';
 import {
   notifyAllActiveAdmins,
   sendResidentNotificationForRecord,
@@ -67,6 +68,11 @@ export async function createMessage(
     // them — staff may still reply to close the conversation out, but the
     // resident cannot keep chatting in it.
     await assertResidentRecordWritable(auth, session);
+    // The barangay starts the conversation: a session an admin created but has
+    // not written in yet is not a thread the resident may post to.
+    if (!(await sessionHasStaffMessage(session._id))) {
+      throw badRequestError('This chat has not been started by the barangay yet.');
+    }
     senderId = String(session.residentId);
     isUser = true;
   } else if (auth.role === 'admin') {

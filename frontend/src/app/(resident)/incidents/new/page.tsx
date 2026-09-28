@@ -1,12 +1,14 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Button from "@mui/material/Button";
 import MenuItem from "@mui/material/MenuItem";
+import Skeleton from "@mui/material/Skeleton";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import Stack from "@mui/material/Stack";
@@ -15,10 +17,25 @@ import Snackbar from "@mui/material/Snackbar";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import { PageHeader } from "@/components/resident/PageHeader";
 import { MediaUploader } from "@/components/shared/MediaUploader";
+import { useBarangayArea } from "@/hooks/useBarangayArea";
+import type { Coordinates } from "@/lib/geo";
 import {
   INCIDENT_CATEGORIES,
   createIncidentReport,
 } from "@/lib/resident";
+
+/**
+ * Leaflet reads `window` while its module is evaluated, so the picker must be
+ * kept out of the server render. `ssr: false` is allowed here because this page
+ * is already a client component.
+ */
+const LocationPicker = dynamic(
+  () => import("@/components/shared/LocationPicker"),
+  {
+    ssr: false,
+    loading: () => <Skeleton variant="rounded" height={300} />,
+  },
+);
 
 /**
  * New Incident Report (`/incidents/new`).
@@ -26,8 +43,12 @@ import {
  * Collects the incident category, description and location, then submits via
  * `POST /incident-reports` and routes to the new report's detail page. The
  * backend's rule-based triage engine assigns the priority on submission.
- * (Photo/video upload UI is shown but disabled — no backend upload endpoint
- * exists yet.)
+ *
+ * The location is captured twice: as a pin on an OpenStreetMap map (stored as
+ * `latitude`/`longitude`, and what responders navigate to) and as a short
+ * written description. The pin is optional so a resident can still file if the
+ * map cannot load, but `locationDetails` is required by the backend because the
+ * admin queues render it as text.
  */
 export default function NewIncidentReportPage() {
   const router = useRouter();
@@ -35,10 +56,14 @@ export default function NewIncidentReportPage() {
   const [incidentCategory, setIncidentCategory] = useState("");
   const [descriptionText, setDescriptionText] = useState("");
   const [locationDetails, setLocationDetails] = useState("");
+  const [locationPin, setLocationPin] = useState<Coordinates | null>(null);
   const [evidenceMediaUrls, setEvidenceMediaUrls] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successOpen, setSuccessOpen] = useState(false);
+
+  // Frames and clamps the incident map to the resident's own barangay.
+  const mapArea = useBarangayArea();
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -50,6 +75,8 @@ export default function NewIncidentReportPage() {
         incidentCategory,
         descriptionText,
         locationDetails,
+        latitude: locationPin?.latitude,
+        longitude: locationPin?.longitude,
         evidenceMediaUrls,
       });
       setSuccessOpen(true);
@@ -114,6 +141,23 @@ export default function NewIncidentReportPage() {
                 placeholder="Describe what happened…"
               />
 
+              {/* Pin the exact spot. The map is clamped to the barangay, and
+                  the pin is the precise location responders navigate to. */}
+              <Box>
+                <Typography
+                  variant="subtitle2"
+                  component="h2"
+                  sx={{ fontWeight: 700, mb: 1 }}
+                >
+                  Pin the Location on the Map
+                </Typography>
+                <LocationPicker
+                  value={locationPin}
+                  onChange={setLocationPin}
+                  area={mapArea}
+                />
+              </Box>
+
               <TextField
                 label="Location Details"
                 required
@@ -122,6 +166,7 @@ export default function NewIncidentReportPage() {
                 onChange={(e) => setLocationDetails(e.target.value)}
                 inputProps={{ "aria-label": "Incident location" }}
                 placeholder="Street, Landmark, Purok…"
+                helperText="Describe the spot in words (street, landmark, purok). Responders read this alongside the pinned map location."
               />
 
               {/* Evidence media (uploaded via S3 presigned URLs). */}

@@ -179,6 +179,8 @@ async function seedIncidents(residentMap: Map<string, mongoose.Types.ObjectId>):
     incidentCategory: i.incidentCategory,
     descriptionText: i.descriptionText,
     locationDetails: i.locationDetails,
+    latitude: i.latitude,
+    longitude: i.longitude,
     triagePriority: i.triagePriority,
     evidenceMediaUrls: i.evidenceMediaUrls.map((url) => url),
     incidentStatus: i.incidentStatus,

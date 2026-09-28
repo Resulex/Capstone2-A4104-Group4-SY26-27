@@ -242,6 +242,12 @@ export async function createIncidentReport(body: {
   incidentCategory: string;
   descriptionText: string;
   locationDetails: string;
+  /**
+   * Pin from the incident map picker. Optional — the map may be unavailable, so
+   * a resident can still file a report with only the written address.
+   */
+  latitude?: number;
+  longitude?: number;
   evidenceMediaUrls?: string[];
 }): Promise<IncidentRecord> {
   return postApi<IncidentRecord>("incident-reports", body);
@@ -277,6 +283,44 @@ export async function fetchIncidentReport(
     return await getApi<IncidentRecord>(
       `incident-reports/${encodeURIComponent(id)}`,
     );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A barangay record as returned by `GET /barangays/{id}`.
+ *
+ * `center`/`bounds` are optional because records created before the incident map
+ * existed carry no coordinates; callers fall back to `BARANGAY_AREA` from
+ * `lib/geo.ts` in that case.
+ */
+export interface BarangayRecord {
+  _id?: string;
+  name: string;
+  city: string;
+  province: string;
+  region?: string;
+  zipCode?: string;
+  center?: { latitude: number; longitude: number } | null;
+  bounds?: {
+    north: number;
+    south: number;
+    east: number;
+    west: number;
+  } | null;
+}
+
+/**
+ * Fetch a single barangay (authenticated). Used to frame the incident map to the
+ * resident's own barangay rather than a hardcoded extent. Never throws —
+ * resolves to null so the caller can fall back to the built-in area.
+ */
+export async function fetchBarangay(
+  id: string,
+): Promise<BarangayRecord | null> {
+  try {
+    return await getApi<BarangayRecord>(`barangays/${encodeURIComponent(id)}`);
   } catch {
     return null;
   }

@@ -3,6 +3,7 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { badRequestError, notFoundError } from '../../../shared/errors';
+import { parseCoordinates } from '../../../shared/coordinates';
 import { IncidentReport } from '../../../models';
 import {
   residentFullName,
@@ -20,6 +21,9 @@ import {
 interface UpdateIncidentBody {
   descriptionText?: string;
   locationDetails?: string;
+  /** Pinned location from the incident map picker (WGS84 decimal degrees). */
+  latitude?: number | null;
+  longitude?: number | null;
   evidenceMediaUrls?: string[];
   triagePriority?: 'Critical' | 'High' | 'Medium' | 'Low';
   incidentStatus?: 'Pending' | 'Responding' | 'Resolved' | 'Closed' | 'Duplicate';
@@ -89,6 +93,15 @@ export async function updateIncidentReport(
   if (body.descriptionText !== undefined) report.descriptionText = body.descriptionText;
   if (body.locationDetails !== undefined) report.locationDetails = body.locationDetails;
   if (body.evidenceMediaUrls !== undefined) report.evidenceMediaUrls = body.evidenceMediaUrls;
+
+  // The pin moves with the address: whoever may edit the address may move it.
+  // Both halves must be sent together, and sending `null` for both clears a
+  // previously set pin.
+  if (body.latitude !== undefined || body.longitude !== undefined) {
+    const coordinates = parseCoordinates(body.latitude, body.longitude);
+    report.latitude = coordinates?.latitude;
+    report.longitude = coordinates?.longitude;
+  }
 
   if (body.incidentStatus !== undefined) {
     const nextStatus = body.incidentStatus;
