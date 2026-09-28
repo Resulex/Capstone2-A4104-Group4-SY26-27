@@ -24,6 +24,7 @@ import { useIdleSession } from "@/hooks/useIdleSession";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import {
   NotificationRecord,
+  chatSessionReferenceKeys,
   fetchNotifications,
   playNotificationSound,
 } from "@/lib/admin";
@@ -210,6 +211,33 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
     const timer = window.setInterval(() => void tick(), 8000);
     return () => window.clearInterval(timer);
   }, [isAuthenticated, user?.role, presentNotification]);
+
+  /**
+   * A conversation only enters the resident's snapshot once the barangay has
+   * written in it (the backend withholds unstarted sessions), so a `chatMessage`
+   * notification naming a session the snapshot does not hold means the snapshot
+   * predates that first staff message. Refetch it so the new chat appears in
+   * `/chat` without a manual reload.
+   *
+   * Each reference is attempted once, so a legacy reference that resolves to
+   * nothing cannot loop the fetch.
+   */
+  const attemptedChatReloadsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const knownRefs = new Set<string>();
+    for (const session of data.chatSessions) {
+      for (const key of chatSessionReferenceKeys(session)) knownRefs.add(key);
+    }
+
+    for (const notification of data.notifications) {
+      if (notification.notificationCategory !== "chatMessage") continue;
+      const ref = notification.referenceUrlId?.trim();
+      if (!ref || knownRefs.has(ref)) continue;
+      if (attemptedChatReloadsRef.current.has(ref)) continue;
+      attemptedChatReloadsRef.current.add(ref);
+      reload();
+    }
+  }, [data.chatSessions, data.notifications, reload]);
 
   /**
    * Open the record a notification is about: clear that record's unread state,

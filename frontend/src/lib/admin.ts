@@ -146,6 +146,13 @@ export interface IncidentRecord {
   incidentCategory: string;
   descriptionText: string;
   locationDetails: string;
+  /**
+   * Pinned location from the incident map picker (WGS84 decimal degrees).
+   * Absent on reports filed before the picker existed, and on any record created
+   * before the backend stored coordinates.
+   */
+  latitude?: number | null;
+  longitude?: number | null;
   triagePriority: string;
   evidenceMediaUrls?: string[];
   incidentStatus: string;

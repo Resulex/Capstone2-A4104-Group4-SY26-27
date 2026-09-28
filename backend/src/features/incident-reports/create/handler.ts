@@ -3,6 +3,7 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody } from '../../../shared/handler';
 import { created, badRequest } from '../../../shared/responses';
 import { badRequestError } from '../../../shared/errors';
+import { parseCoordinates } from '../../../shared/coordinates';
 import { IncidentReport, Resident } from '../../../models';
 import {
   getAuthContext,
@@ -27,6 +28,9 @@ interface CreateIncidentBody {
     | 'Other';
   descriptionText?: string;
   locationDetails?: string;
+  /** Pinned location from the incident map picker, when the resident used it. */
+  latitude?: number;
+  longitude?: number;
   evidenceMediaUrls?: string[];
   incidentStatus?: 'Pending' | 'Responding' | 'Resolved' | 'Closed' | 'Duplicate';
 }
@@ -96,6 +100,9 @@ export async function createIncidentReport(
   const body = parseBody(event) as CreateIncidentBody;
 
   const { incidentCategory, descriptionText, locationDetails } = body;
+  // Throws a 400 for a half-filled or out-of-range pin; returns `undefined`
+  // when the resident only typed an address (records predating the picker).
+  const coordinates = parseCoordinates(body.latitude, body.longitude);
 
   // The report owner is derived from the caller for self-service creates — a
   // resident's (or official's, acting through the resident portal) JWT `sub` is
@@ -149,6 +156,8 @@ export async function createIncidentReport(
     incidentCategory,
     descriptionText,
     locationDetails,
+    latitude: coordinates?.latitude,
+    longitude: coordinates?.longitude,
     // System-driven triage: priority is computed by rules, not chosen by a human.
     triagePriority: computeTriagePriority(incidentCategory, descriptionText),
     evidenceMediaUrls: body.evidenceMediaUrls || [],

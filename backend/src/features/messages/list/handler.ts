@@ -9,6 +9,10 @@ import {
   isResidentRecordHidden,
   residentRecordScopeFilter,
 } from '../../../shared/authorization';
+import {
+  sessionHasStaffMessage,
+  staffStartedSessionIds,
+} from '../../../shared/chat-sessions';
 
 /**
  * Messages — List
@@ -45,6 +49,12 @@ export async function listMessages(
     ) {
       return badRequest('You are not a participant of this session.');
     }
+    // A resident only reaches a session the barangay has started; until the
+    // first staff message it is an internal workspace, reported exactly like an
+    // id that does not exist.
+    if (auth.role === 'resident' && !(await sessionHasStaffMessage(session._id))) {
+      return badRequest('Invalid sessionId.');
+    }
     query.sessionId = session._id;
   } else {
     // No session filter: residents are scoped to their own sessions by session
@@ -56,7 +66,12 @@ export async function listMessages(
       const sessions = await ChatSession.find(await residentRecordScopeFilter(auth))
         .select('_id')
         .lean();
-      query.sessionId = { $in: sessions.map((s) => s._id) };
+      // Same "started" gate as the session list: an unstarted session holds no
+      // conversation to search.
+      const started = await staffStartedSessionIds(sessions.map((session) => session._id));
+      query.sessionId = {
+        $in: sessions.map((s) => s._id).filter((id) => started.has(String(id))),
+      };
     }
   }
 

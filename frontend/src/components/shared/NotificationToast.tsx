@@ -5,7 +5,6 @@ import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import LinearProgress from "@mui/material/LinearProgress";
 import Snackbar from "@mui/material/Snackbar";
-import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 
 /**
  * How long a notification toast stays on screen — and how much time it gets

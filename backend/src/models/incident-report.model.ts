@@ -46,6 +46,13 @@ export interface IIncidentReport extends Document {
   incidentCategory: IncidentCategory;
   descriptionText: string;
   locationDetails: string;
+  /**
+   * Pinned location from the incident map picker (WGS84 decimal degrees).
+   * Optional: reports filed before the picker existed carry only
+   * `locationDetails`, so the UI must render without a pin for those.
+   */
+  latitude?: number;
+  longitude?: number;
   triagePriority: TriagePriority; // Automated by Rule-Based Prioritization engine
   evidenceMediaUrls: string[]; // AWS S3 links for photos/videos
   incidentStatus: IncidentStatus;
@@ -107,6 +114,10 @@ const incidentReportSchema = new Schema<IIncidentReport>(
     },
     descriptionText: { type: String, required: true },
     locationDetails: { type: String, required: true, trim: true },
+    // Optional map pin. The two are validated as a pair in the request handlers
+    // (`shared/coordinates.ts`) so bad input is a 400, not a Mongoose 500.
+    latitude: { type: Number, min: -90, max: 90 },
+    longitude: { type: Number, min: -180, max: 180 },
     triagePriority: {
       type: String,
       enum: ['Critical', 'High', 'Medium', 'Low'],
