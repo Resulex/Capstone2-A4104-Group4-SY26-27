@@ -8,16 +8,23 @@ import { resolveAuthContext, requireSuperAdmin } from '../../../shared/authoriza
 
 /**
  * Admins — Get
- * Use-case: fetch a single administrator. SUPER_ADMIN only — this powers the
- * User Management detail page, which only super admins may open.
- * GET /admins/{id} (admin, assignedRole = SUPER_ADMIN)
+ * Use-case: fetch a single administrator.
+ *
+ * An admin may always read their OWN record: `frontend/src/app/api/admin/profile`
+ * proxies this route with the session JWT's subject for the sidebar/settings
+ * profile, and the admin console fails closed when that fetch fails — so gating
+ * the whole route to SUPER_ADMIN locked every OPERATIONS_CLERK / INFO_OFFICER
+ * out of the entire `/admin/*` console.
+ *
+ * Reading ANOTHER admin stays SUPER_ADMIN-only (the User Management detail
+ * page is the only consumer of that case).
+ * GET /admins/{id} (admin: own record; any record for assignedRole = SUPER_ADMIN)
  */
 export async function getAdmin(
   event: APIGatewayProxyEvent,
   _context: Context
 ): Promise<APIGatewayProxyResult> {
   const auth = await resolveAuthContext(event);
-  requireSuperAdmin(auth);
 
   const id = parsePathParam(event, 'id');
   await connectToDatabase();
@@ -26,6 +33,14 @@ export async function getAdmin(
 
   if (!admin) {
     throw notFoundError('Admin not found.');
+  }
+
+  // Same self test as `admins/update`: the JWT subject is the Mongo `_id`,
+  // while `auth.admin` was resolved through `adminId` (with an `_id` fallback).
+  const targetIsSelf =
+    auth.admin?.adminId === admin.adminId || String(admin._id) === auth.userId;
+  if (!targetIsSelf) {
+    requireSuperAdmin(auth);
   }
 
   return ok(admin.toPublicJSON(), 'Admin fetched.');

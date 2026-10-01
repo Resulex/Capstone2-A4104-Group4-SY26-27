@@ -25,7 +25,10 @@ interface UpdateAdminBody {
 /**
  * Admins — Update
  * Use-case: update an admin account. Role/status changes require the top-tier
- * 'SUPER_ADMIN' assigned role; basic profile edits allow any admin.
+ * 'SUPER_ADMIN' assigned role, and an admin may always edit the basic profile
+ * fields (names, phone) on their OWN record — that is what the Settings page
+ * saves. Editing ANOTHER admin's profile is SUPER_ADMIN-only, like the rest of
+ * the user-management surface.
  * PATCH /admins/{id} (admin)
  */
 export async function updateAdmin(
@@ -64,6 +67,18 @@ export async function updateAdmin(
     body.userName !== undefined ||
     body.emailAddress !== undefined;
   if (changesRoleOrStatus) {
+    requireAssignedRole(auth, ['SUPER_ADMIN']);
+  }
+
+  // Basic profile fields are self-service (the Settings page saves the
+  // signed-in admin's own names here), but they must not become a way to edit
+  // another admin's profile without the top-tier role.
+  const editsPersonalFields =
+    body.firstName !== undefined ||
+    body.lastName !== undefined ||
+    body.middleName !== undefined ||
+    body.phoneNumber !== undefined;
+  if (!targetIsSelf && editsPersonalFields) {
     requireAssignedRole(auth, ['SUPER_ADMIN']);
   }
 

@@ -990,8 +990,12 @@ export async function fetchAdmins(): Promise<AdminRecord[]> {
 }
 
 /**
- * Fetch a single admin account (SUPER_ADMIN-only on the backend). Returns null
- * when the record is missing, mirroring `fetchResident`.
+ * Fetch a single admin account. Returns null when the record is missing,
+ * mirroring `fetchResident`.
+ *
+ * The backend allows an admin to read their OWN record and gates every other
+ * record to SUPER_ADMIN, so this only returns a result on the User Management
+ * (super-admin) pages or for the signed-in admin's own id.
  */
 export async function fetchAdmin(id: string): Promise<AdminRecord | null> {
   try {
