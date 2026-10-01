@@ -46,6 +46,13 @@ export interface IIncidentReport extends Document {
   incidentCategory: IncidentCategory;
   descriptionText: string;
   /**
+   * Contact number the reporter supplied for this incident (digits only, at
+   * most 11 — see `shared/contact-number.ts`). Optional: the create handler
+   * falls back to the reporting resident's stored number, and reports filed
+   * before this field existed simply have none.
+   */
+  contactNumber?: string;
+  /**
    * LEGACY free-text address. New reports no longer write it: the write path
    * takes a validated `purok` plus an optional free-text `landmark`, so the
    * location can be checked against the barangay's own vocabulary.
@@ -141,6 +148,10 @@ const incidentReportSchema = new Schema<IIncidentReport>(
       required: true,
     },
     descriptionText: { type: String, required: true },
+    // Optional reporter contact snapshot. Deliberately not `required`: legacy
+    // records have no value, and the create handler is what validates and
+    // normalizes whatever the client supplies.
+    contactNumber: { type: String, trim: true },
     // Legacy column — see the interface. Optional because new reports no longer
     // write it, and `required: true` would make `create()` fail validation.
     locationDetails: { type: String, trim: true },

@@ -250,6 +250,11 @@ export async function createIncidentReport(body: {
   /** Free-text landmark/house note supplementing `purok`. Optional. */
   landmark?: string;
   /**
+   * Contact number to reach the reporter at. Optional — when omitted the
+   * backend snapshots the resident's stored number instead.
+   */
+  contactNumber?: string;
+  /**
    * Pin from the incident map picker. Optional — the map may be unavailable, so
    * a resident can still file a report with only the written address.
    */
