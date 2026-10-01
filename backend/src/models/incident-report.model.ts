@@ -45,7 +45,22 @@ export interface IIncidentReport extends Document {
   residentId: mongoose.Types.ObjectId; // Reporter ref -> Resident
   incidentCategory: IncidentCategory;
   descriptionText: string;
-  locationDetails: string;
+  /**
+   * LEGACY free-text address. New reports no longer write it: the write path
+   * takes a validated `purok` plus an optional free-text `landmark`, so the
+   * location can be checked against the barangay's own vocabulary.
+   *
+   * The column is kept rather than removed for two reasons: records filed before
+   * the purok field existed must keep rendering, and dropping it from the schema
+   * would make responses disagree — `list` reads raw documents (`.lean()`),
+   * which still returns the value, while `get`/`create`/`update` use
+   * `.toObject()`, which strips fields absent from the schema.
+   */
+  locationDetails?: string;
+  /** Validated purok the incident is in. Required on the write path. */
+  purok?: string;
+  /** Free-text landmark/house note supplementing `purok`. Never validated. */
+  landmark?: string;
   /**
    * Pinned location from the incident map picker (WGS84 decimal degrees).
    * Optional: reports filed before the picker existed carry only
@@ -113,7 +128,14 @@ const incidentReportSchema = new Schema<IIncidentReport>(
       required: true,
     },
     descriptionText: { type: String, required: true },
-    locationDetails: { type: String, required: true, trim: true },
+    // Legacy column — see the interface. Optional because new reports no longer
+    // write it, and `required: true` would make `create()` fail validation.
+    locationDetails: { type: String, trim: true },
+    // Optional in the schema but required by the create handler: a
+    // `required: true` field here would make `save()` throw on the pre-existing
+    // records the backfill migration cannot match.
+    purok: { type: String, trim: true },
+    landmark: { type: String, trim: true },
     // Optional map pin. The two are validated as a pair in the request handlers
     // (`shared/coordinates.ts`) so bad input is a 400, not a Mongoose 500.
     latitude: { type: Number, min: -90, max: 90 },

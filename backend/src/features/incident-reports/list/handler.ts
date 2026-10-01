@@ -22,7 +22,11 @@ export async function listIncidentReports(
   // resident-initiated account deletion (see `residentRecordScopeFilter`).
   const query = await residentRecordScopeFilter(auth);
 
-  const reports = await IncidentReport.find(query).lean();
+  // Newest first (index-backed by `reportedAt: -1`). Without an explicit sort the
+  // response followed Mongo's natural order, which put a freshly filed report
+  // last — the resident then had to scroll to find the report they had just
+  // submitted. Admins re-sort their own view, so this only fixes the raw order.
+  const reports = await IncidentReport.find(query).sort({ reportedAt: -1 }).lean();
   return ok(reports, 'Incident reports fetched.');
 }
 

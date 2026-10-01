@@ -31,6 +31,15 @@ export interface IBarangay extends Document {
   center?: IBarangayCenter;
   /** Box used to clamp the map picker to the barangay. */
   bounds?: IBarangayBounds;
+  /**
+   * The barangay's puroks/sitios. This is the controlled vocabulary an incident
+   * report's `purok` is validated against, which is why it lives in data rather
+   * than in a constant: the barangay can correct the list without a code change.
+   *
+   * Optional because rows seeded before this field existed carry no list; the
+   * migration `add-barangay-puroks` backfills them.
+   */
+  puroks?: string[];
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -66,6 +75,10 @@ const barangaySchema = new Schema<IBarangay>(
     // to a hardcoded barangay area in that case.
     center: { type: centerSchema, required: false },
     bounds: { type: boundsSchema, required: false },
+    // No `required: true`: rows seeded before the field existed must still save,
+    // exactly like `center`/`bounds`. An empty list is handled by the incident
+    // handler, which refuses to validate a purok it cannot check.
+    puroks: { type: [String], default: [] },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

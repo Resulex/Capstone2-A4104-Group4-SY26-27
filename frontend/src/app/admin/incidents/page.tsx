@@ -51,6 +51,7 @@ import {
   ResidentRecord,
   fetchIncidentReports,
   fetchResidents,
+  formatIncidentLocation,
   hasUnreadReference,
   incidentReferenceKeys,
   updateIncidentReport,
@@ -675,7 +676,7 @@ function IncidentsPageContent() {
                             noWrap
                             sx={{ maxWidth: 220 }}
                           >
-                            {incident.locationDetails || "—"}
+                            {formatIncidentLocation(incident) || "—"}
                           </Typography>
                         </Tooltip>
                       </TableCell>

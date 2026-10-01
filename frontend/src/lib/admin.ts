@@ -146,7 +146,19 @@ export interface IncidentRecord {
   residentId: string;
   incidentCategory: string;
   descriptionText: string;
-  locationDetails: string;
+  /**
+   * Legacy free-text address. Present on records filed before the validated
+   * purok field existed; new reports are not given one, so render through
+   * `formatIncidentLocation` rather than reading it directly.
+   */
+  locationDetails?: string;
+  /**
+   * Validated purok the incident is in (one of the barangay's puroks), and the
+   * free-text landmark note that supplements it. Both absent on reports filed
+   * before the purok field existed.
+   */
+  purok?: string | null;
+  landmark?: string | null;
   /**
    * Pinned location from the incident map picker (WGS84 decimal degrees).
    * Absent on reports filed before the picker existed, and on any record created
@@ -166,6 +178,24 @@ export interface IncidentRecord {
   reportedAt: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+/**
+ * The location line for an incident, in one place so every surface agrees.
+ *
+ * Newer reports carry a validated `purok` plus an optional free-text `landmark`;
+ * older ones carry only the legacy `locationDetails` prose. Falling back keeps
+ * the pre-purok records rendering without a migration or a special case.
+ */
+export function formatIncidentLocation(
+  record: Pick<IncidentRecord, "purok" | "landmark" | "locationDetails">,
+): string {
+  const structured = [record.purok, record.landmark]
+    .map((part) => part?.trim())
+    .filter((part): part is string => !!part)
+    .join(" — ");
+
+  return structured || record.locationDetails?.trim() || "";
 }
 
 /** An announcement record. */
@@ -350,10 +380,20 @@ export async function updateDocumentRequest(
   );
 }
 
-/** Fetch all incident reports (admin sees all; backend scopes by role). */
+/** Fetch all incident reports, newest first (admin sees all; backend scopes by role). */
 export async function fetchIncidentReports(): Promise<IncidentRecord[]> {
   try {
-    return await getApi<IncidentRecord[]>("incident-reports");
+    const records = await getApi<IncidentRecord[]>("incident-reports");
+    // Newest first, mirroring `fetchDocumentRequests`. `reportedAt` is the
+    // backend's indexed sort key and is the one date every record carries, so a
+    // freshly filed report lands at the top instead of wherever Mongo's natural
+    // order happens to put it. `|| 0` keeps a record missing the date last
+    // rather than poisoning the comparator with NaN.
+    return records.sort(
+      (a, b) =>
+        new Date(b.reportedAt || 0).getTime() -
+        new Date(a.reportedAt || 0).getTime(),
+    );
   } catch {
     return [];
   }
