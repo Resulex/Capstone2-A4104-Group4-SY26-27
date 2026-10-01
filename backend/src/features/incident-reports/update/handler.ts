@@ -4,7 +4,8 @@ import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } 
 import { ok } from '../../../shared/responses';
 import { badRequestError, notFoundError } from '../../../shared/errors';
 import { parseCoordinates } from '../../../shared/coordinates';
-import { IncidentReport } from '../../../models';
+import { assertPurokInBarangay, resolveBarangayPuroks } from '../../../shared/puroks';
+import { IncidentReport, Resident } from '../../../models';
 import {
   residentFullName,
   notifyAllActiveAdmins,
@@ -20,6 +21,15 @@ import {
 
 interface UpdateIncidentBody {
   descriptionText?: string;
+  /** Validated purok; normalized to the barangay's own spelling. */
+  purok?: string;
+  /** Free-text landmark/house note supplementing `purok`. */
+  landmark?: string;
+  /**
+   * Legacy free-text address. Not writable any more: it would bypass the purok
+   * validation. Still accepted so an older client fails on the required `purok`
+   * rather than on an unknown field.
+   */
   locationDetails?: string;
   /** Pinned location from the incident map picker (WGS84 decimal degrees). */
   latitude?: number | null;
@@ -91,8 +101,25 @@ export async function updateIncidentReport(
     body.incidentStatus !== undefined ? await actorIdentity(auth) : null;
 
   if (body.descriptionText !== undefined) report.descriptionText = body.descriptionText;
-  if (body.locationDetails !== undefined) report.locationDetails = body.locationDetails;
   if (body.evidenceMediaUrls !== undefined) report.evidenceMediaUrls = body.evidenceMediaUrls;
+
+  // The purok is validated here as well as on create: create-only validation
+  // would be bypassable by filing inside the barangay and then PATCHing the
+  // address. Checked against the REPORTING resident's barangay, so an admin
+  // editing on someone's behalf is held to that barangay's vocabulary.
+  //
+  // `locationDetails` is deliberately no longer assignable — leaving the legacy
+  // free-text column writable would reopen exactly the same bypass.
+  if (body.purok !== undefined) {
+    const owner = await Resident.findById(report.residentId)
+      .select('barangay')
+      .lean();
+    const puroks = await resolveBarangayPuroks(owner?.barangay);
+    report.purok = assertPurokInBarangay(body.purok, puroks);
+  }
+  if (body.landmark !== undefined) {
+    report.landmark = body.landmark?.trim() || undefined;
+  }
 
   // The pin moves with the address: whoever may edit the address may move it.
   // Both halves must be sent together, and sending `null` for both clears a

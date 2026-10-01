@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Grid from "@mui/material/Grid";
 import Button from "@mui/material/Button";
@@ -29,11 +29,20 @@ export default function IncidentReportsPage() {
   const {
     data,
     isLoading,
+    refresh,
     unreadIncidentIds,
     markRecordsRead,
     markRecordsUnread,
   } = useResidentDashboard();
   const incidents = data.incidentReports;
+
+  // Nudge an authoritative read on arrival: the provider's snapshot is fetched
+  // once per shell mount and survives soft navigation, so a report filed (or
+  // resolved by staff) since then would otherwise stay missing from this grid.
+  // The quiet refetch never flips `isLoading`, so the list is not blanked.
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
   /** When true the grid shows only reports with unseen updates. */
   const [unreadOnly, setUnreadOnly] = useState(false);
 

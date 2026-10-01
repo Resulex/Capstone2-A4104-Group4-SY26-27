@@ -21,8 +21,8 @@ import { StatusChip } from "@/components/resident/StatusChip";
 import { EmptyState } from "@/components/resident/EmptyState";
 import { LoadingSkeleton } from "@/components/resident/LoadingSkeleton";
 import { TimelineSteps } from "@/components/shared/TimelineSteps";
-import { useBarangayArea } from "@/hooks/useBarangayArea";
-import { IncidentRecord } from "@/lib/admin";
+import { useBarangay } from "@/hooks/useBarangay";
+import { IncidentRecord, formatIncidentLocation } from "@/lib/admin";
 import { coordinatesFrom } from "@/lib/geo";
 import { fetchIncidentReport, formatDateTime } from "@/lib/resident";
 import { isImageUrl, isVideoUrl, fileNameOf } from "@/lib/uploads";
@@ -151,8 +151,10 @@ export default function IncidentDetailsPage() {
   }, [id]);
 
   // Frames the read-only map to the resident's own barangay.
-  const mapArea = useBarangayArea();
+  const { area: mapArea } = useBarangay();
   const pin = coordinatesFrom(report);
+  // Structured location for new reports, legacy free text for older ones.
+  const locationLabel = report ? formatIncidentLocation(report) : "";
 
   return (
     <Box sx={{ maxWidth: 860, mx: "auto" }}>
@@ -189,10 +191,10 @@ export default function IncidentDetailsPage() {
                     height={260}
                   />
                 ) : (
-                  <LocationPlaceholder label={report.locationDetails} />
+                  <LocationPlaceholder label={locationLabel} />
                 )}
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-                  {report.locationDetails}
+                  {locationLabel}
                 </Typography>
               </CardContent>
             </Card>
@@ -247,7 +249,7 @@ export default function IncidentDetailsPage() {
                 />
                 <DetailRow
                   label="Location Details"
-                  value={report.locationDetails}
+                  value={locationLabel}
                 />
                 <Typography
                   variant="body2"

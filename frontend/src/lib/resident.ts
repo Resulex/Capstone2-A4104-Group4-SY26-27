@@ -241,7 +241,14 @@ export async function fetchAccountDeletionState(): Promise<AccountDeletionState>
 export async function createIncidentReport(body: {
   incidentCategory: string;
   descriptionText: string;
-  locationDetails: string;
+  /**
+   * The purok the incident is in. Required, and validated by the backend against
+   * the reporting resident's barangay — so it must come from that barangay's
+   * `puroks` list rather than being typed freely.
+   */
+  purok: string;
+  /** Free-text landmark/house note supplementing `purok`. Optional. */
+  landmark?: string;
   /**
    * Pin from the incident map picker. Optional — the map may be unavailable, so
    * a resident can still file a report with only the written address.
@@ -294,6 +301,10 @@ export async function fetchIncidentReport(
  * `center`/`bounds` are optional because records created before the incident map
  * existed carry no coordinates; callers fall back to `BARANGAY_AREA` from
  * `lib/geo.ts` in that case.
+ *
+ * `puroks` is the closed location vocabulary incident reports are validated
+ * against. Also optional, for the same reason: a row created before the field
+ * existed carries no list, and the form must degrade rather than offer nothing.
  */
 export interface BarangayRecord {
   _id?: string;
@@ -309,6 +320,7 @@ export interface BarangayRecord {
     east: number;
     west: number;
   } | null;
+  puroks?: string[] | null;
 }
 
 /**

@@ -39,6 +39,18 @@ export interface IDocumentRequest extends Document {
   expectedCompletionDate: Date;
   timeline: IDocumentTimeline[];
   remarks?: string; // Latest admin note (mirrors the newest timeline entry)
+  /**
+   * Soft-archive flag. Archiving is a SUPER_ADMIN-only governance action: the
+   * request leaves every normal queue (including the applicant's own list) and
+   * is retrievable only from the admin Archived view. `currentStatus` is left
+   * untouched so the processing history stays truthful.
+   */
+  isArchived: boolean;
+  archivedAt?: Date;
+  /** Admin `_id` of the super admin who archived the request. */
+  archivedBy?: string;
+  /** Optional note recorded when the request was archived. */
+  archivedReason?: string;
   dateRequested: Date;
   /** Set by the schema's `timestamps` option. */
   createdAt: Date;
@@ -94,6 +106,12 @@ const documentRequestSchema = new Schema<IDocumentRequest>(
     expectedCompletionDate: { type: Date, required: true },
     timeline: { type: [timelineSchema], default: [] },
     remarks: { type: String, trim: true },
+    // Soft-archive (SUPER_ADMIN only) — see the interface for why this is
+    // separate from `currentStatus`.
+    isArchived: { type: Boolean, default: false },
+    archivedAt: { type: Date },
+    archivedBy: { type: String, trim: true },
+    archivedReason: { type: String, trim: true },
     dateRequested: { type: Date, required: true, default: Date.now },
   },
   { timestamps: true }

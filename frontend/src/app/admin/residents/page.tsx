@@ -18,18 +18,29 @@ import TableCell from "@mui/material/TableCell";
 import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
+import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import ArchiveIcon from "@mui/icons-material/Archive";
 import PeopleIcon from "@mui/icons-material/People";
+import UnarchiveIcon from "@mui/icons-material/Unarchive";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import { useAuth } from "@/context/AuthContext";
+import { useCanArchive } from "@/hooks/useCanArchive";
 import { ResidentActionMenu } from "@/components/admin/ResidentActionMenu";
+import { ArchiveConfirmDialog } from "@/components/admin/ArchiveConfirmDialog";
+import { ArchiveScopeToggle } from "@/components/admin/ArchiveScopeToggle";
 import {
+  ArchiveScope,
+  archiveRecord,
   fetchResidents,
+  isRecordArchived,
+  recordArchivedAt,
   RESIDENT_DELETION_COLORS,
   RESIDENT_STATUS_COLORS,
   ResidentRecord,
   residentDeletionLabel,
   residentDeletionState,
+  restoreRecord,
 } from "@/lib/admin";
 
 /** Build a resident's full name from its name fields. */
@@ -48,6 +59,20 @@ function address(resident: ResidentRecord): string {
   return parts || "—";
 }
 
+/** "Archived 12 Mar 2026 — reason" tooltip for an archived row's chip. */
+function archivedLabel(resident: ResidentRecord): string {
+  const at = recordArchivedAt(resident);
+  const when = at
+    ? `Archived ${new Date(at).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })}`
+    : "Archived";
+  const reason = resident.archivedReason?.trim();
+  return reason ? `${when} — ${reason}` : when;
+}
+
 /**
  * Admin Residents page — lists all residents (scoped by role on the backend)
  * with their contact details, address, account status, and provisioning state.
@@ -55,11 +80,19 @@ function address(resident: ResidentRecord): string {
 export default function ResidentsPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
+  const { canArchive } = useCanArchive();
 
   const [residents, setResidents] = useState<ResidentRecord[]>([]);
+  /** Active or archived slice of the resident list; archived is SUPER_ADMIN only. */
+  const [scope, setScope] = useState<ArchiveScope>("active");
+  /** Row awaiting archive/restore confirmation. */
+  const [pendingArchive, setPendingArchive] = useState<
+    { resident: ResidentRecord; action: "archive" | "restore" } | null
+  >(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -82,9 +115,12 @@ export default function ResidentsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    setIsLoading(true);
     (async () => {
       try {
-        const data = await fetchResidents();
+        // The scope is part of the request, not a client-side filter: the
+        // backend refuses the archived slice for anyone but a Super Admin.
+        const data = await fetchResidents(scope);
         if (!cancelled) setResidents(data);
       } catch (err) {
         if (!cancelled) {
@@ -99,20 +135,69 @@ export default function ResidentsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scope]);
+
+  /** Archive or restore the resident awaiting confirmation. */
+  const handleArchiveAction = async (reason?: string) => {
+    const target = pendingArchive;
+    if (!target) return;
+    const key = target.resident._id ?? target.resident.residentId;
+    setActionError(null);
+    try {
+      if (target.action === "archive") {
+        await archiveRecord("residents", key, reason);
+        setSuccessMessage("Resident archived.");
+      } else {
+        await restoreRecord("residents", key);
+        setSuccessMessage("Resident restored.");
+      }
+      // The row no longer belongs to the visible scope.
+      const matches = (record: ResidentRecord) =>
+        (record._id ?? record.residentId) !== key;
+      setResidents((prev) => prev.filter(matches));
+      setPendingArchive(null);
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "Failed to update the archive state.",
+      );
+    }
+  };
 
   if (isAuthLoading || !isAuthenticated || user?.role !== "admin") {
     return null;
   }
 
+  /** True while showing the archived slice; every row is archived then. */
+  const isArchivedView = scope === "archived";
+
   return (
     <Box>
-      <Typography variant="h5" component="h2" gutterBottom>
-        Residents
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Manage and review registered barangay residents.
-      </Typography>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        justifyContent="space-between"
+        spacing={2}
+        sx={{ mb: 3 }}
+      >
+        <Box>
+          <Typography variant="h5" component="h2" gutterBottom>
+            Residents
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {isArchivedView
+              ? "Archived resident records are hidden from the list. Restore one to make it active again."
+              : "Manage and review registered barangay residents."}
+          </Typography>
+        </Box>
+        <ArchiveScopeToggle
+          scope={scope}
+          onChange={setScope}
+          label="residents"
+          disabled={isLoading}
+        />
+      </Stack>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -238,6 +323,16 @@ export default function ResidentsPage() {
                           spacing={1}
                           alignItems="center"
                         >
+                          {isRecordArchived(resident) && (
+                            <Tooltip title={archivedLabel(resident)}>
+                              <Chip
+                                label="Archived"
+                                size="small"
+                                color="warning"
+                                variant="outlined"
+                              />
+                            </Tooltip>
+                          )}
                           <Button
                             size="small"
                             variant="outlined"
@@ -252,10 +347,41 @@ export default function ResidentsPage() {
                           >
                             View
                           </Button>
-                          <ResidentActionMenu
-                            resident={resident}
-                            onUpdated={handleResidentUpdated}
-                          />
+                          {isArchivedView ? (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<UnarchiveIcon />}
+                              onClick={() =>
+                                setPendingArchive({ resident, action: "restore" })
+                              }
+                            >
+                              Restore
+                            </Button>
+                          ) : (
+                            <>
+                              <ResidentActionMenu
+                                resident={resident}
+                                onUpdated={handleResidentUpdated}
+                              />
+                              {canArchive && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="warning"
+                                  startIcon={<ArchiveIcon />}
+                                  onClick={() =>
+                                    setPendingArchive({
+                                      resident,
+                                      action: "archive",
+                                    })
+                                  }
+                                >
+                                  Archive
+                                </Button>
+                              )}
+                            </>
+                          )}
                         </Stack>
                       </TableCell>
                     </TableRow>
@@ -272,6 +398,21 @@ export default function ResidentsPage() {
         autoHideDuration={6000}
         onClose={() => setActionError(null)}
         message={actionError ?? ""}
+      />
+
+      <Snackbar
+        open={Boolean(successMessage)}
+        autoHideDuration={4000}
+        onClose={() => setSuccessMessage(null)}
+        message={successMessage ?? ""}
+      />
+
+      <ArchiveConfirmDialog
+        open={pendingArchive !== null}
+        action={pendingArchive?.action ?? "archive"}
+        subject={`Resident "${pendingArchive ? fullName(pendingArchive.resident) : ""}"`}
+        onConfirm={handleArchiveAction}
+        onCancel={() => setPendingArchive(null)}
       />
     </Box>
   );

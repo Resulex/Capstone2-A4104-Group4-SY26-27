@@ -12,6 +12,11 @@ export interface SeedBarangay {
   center: { latitude: number; longitude: number };
   /** Box used to clamp the incident location picker to the barangay. */
   bounds: { north: number; south: number; east: number; west: number };
+  /**
+   * The barangay's puroks/sitios. Incident reports are validated against this
+   * list, so it is the single source of truth for the location vocabulary.
+   */
+  puroks: string[];
 }
 
 export interface SeedAdmin {
@@ -70,6 +75,11 @@ export interface SeedAnnouncement {
 // `center` and `bounds` are the real OSM extent of Barangay Labuin, Pila,
 // Laguna (OSM relation 17242188): roughly 1.44 km x 1.53 km, about 2.2 km2.
 // The bounds are what keep the incident map picker inside the barangay.
+//
+// `puroks` is the demo vocabulary implied by the seeded residents (Purok 1-4).
+// It is NOT an authoritative list -- Philippine puroks sit below the barangay
+// tier that PSA/PSGC publishes, so no public source confirms it. It lives here
+// (rather than in a constant) so the real list can be corrected in data only.
 export const BARANGAY: SeedBarangay = {
   name: 'Purok 2, Barangay Labuin',
   city: 'Pila',
@@ -83,6 +93,7 @@ export const BARANGAY: SeedBarangay = {
     east: 121.3750758,
     west: 121.3608884,
   },
+  puroks: ['Purok 1', 'Purok 2', 'Purok 3', 'Purok 4'],
 };
 
 // Admins: keys are used to reference authorId.

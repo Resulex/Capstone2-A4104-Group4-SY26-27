@@ -6,6 +6,68 @@ import type { AssignedAdminRole } from "@/lib/rbac";
  * management pages. These are derived from the backend's list endpoints.
  */
 
+/**
+ * Which slice of a record set a queue page is showing.
+ *
+ * `active` is the default everywhere. Archived records are hidden from every
+ * normal list — including the owning resident's own view — and the backend
+ * answers `archived` with a 403 unless the caller is a SUPER_ADMIN, so the
+ * toggle that produces this value is only ever rendered for one role.
+ */
+export type ArchiveScope = "active" | "archived";
+
+/** The archive columns the four newer collections expose. */
+export interface ArchiveMetadata {
+  /** True while the record is retired from every queue. */
+  isArchived?: boolean;
+  /** When it was archived. */
+  archivedAt?: string;
+  /** Admin id of the super admin who archived it (audit only). */
+  archivedBy?: string;
+  /** Optional note the archiver supplied. */
+  archivedReason?: string;
+}
+
+/**
+ * The collections that support archive / restore. Used as the path segment, so
+ * the union is what stops a typo from reaching the backend as a silent 404.
+ */
+export type ArchivableResource =
+  | "incident-reports"
+  | "document-requests"
+  | "announcements"
+  | "chat-sessions"
+  | "residents"
+  | "officials";
+
+/**
+ * Whether a record is archived, whichever column carries the flag.
+ *
+ * Residents and officials predate the archive feature and store the flag as
+ * `isDeleted`/`deletedAt`; everything else uses `isArchived`/`archivedAt`. One
+ * accessor keeps the six queue pages from each re-deriving that rule (and from
+ * getting it wrong for exactly one of them).
+ */
+export function isRecordArchived(record: {
+  isArchived?: boolean;
+  isDeleted?: boolean;
+}): boolean {
+  return record.isArchived === true || record.isDeleted === true;
+}
+
+/** When a record was archived, whichever column carries the date. */
+export function recordArchivedAt(record: {
+  archivedAt?: string;
+  deletedAt?: string;
+}): string | undefined {
+  return record.archivedAt ?? record.deletedAt;
+}
+
+/** Appends the archive scope to a collection path for `getApi`. */
+function withScope(path: string, scope: ArchiveScope): string {
+  return `${path}?scope=${scope}`;
+}
+
 /** Resident account states the backend can store. */
 export type ResidentAccountStatus = "active" | "suspended" | "deactivated";
 
@@ -79,6 +141,10 @@ export interface ResidentRecord {
   /** Soft-delete flag — deleted residents are hidden from the list. */
   isDeleted?: boolean;
   deletedAt?: string;
+  /** Admin id of the super admin who archived the account (audit only). */
+  archivedBy?: string;
+  /** Optional note recorded when the account was archived. */
+  archivedReason?: string;
   /**
    * Resident-INITIATED deletion. Unlike `isDeleted` the resident stays visible
    * here (and can still sign in); only their own view of the records they filed
@@ -116,7 +182,7 @@ export interface TimelineEntry {
 }
 
 /** A document request record for the queue page. */
-export interface DocumentQueueRecord {
+export interface DocumentQueueRecord extends ArchiveMetadata {
   /**
    * Mongo id. The list endpoint returns the whole document, so this is present
    * at runtime; it is also accepted when a notification deep-links here.
@@ -140,13 +206,25 @@ export interface DocumentQueueRecord {
 }
 
 /** An incident report record (fields exposed by the list endpoint). */
-export interface IncidentRecord {
+export interface IncidentRecord extends ArchiveMetadata {
   _id?: string;
   incidentId: string;
   residentId: string;
   incidentCategory: string;
   descriptionText: string;
-  locationDetails: string;
+  /**
+   * Legacy free-text address. Present on records filed before the validated
+   * purok field existed; new reports are not given one, so render through
+   * `formatIncidentLocation` rather than reading it directly.
+   */
+  locationDetails?: string;
+  /**
+   * Validated purok the incident is in (one of the barangay's puroks), and the
+   * free-text landmark note that supplements it. Both absent on reports filed
+   * before the purok field existed.
+   */
+  purok?: string | null;
+  landmark?: string | null;
   /**
    * Pinned location from the incident map picker (WGS84 decimal degrees).
    * Absent on reports filed before the picker existed, and on any record created
@@ -168,8 +246,26 @@ export interface IncidentRecord {
   updatedAt?: string;
 }
 
+/**
+ * The location line for an incident, in one place so every surface agrees.
+ *
+ * Newer reports carry a validated `purok` plus an optional free-text `landmark`;
+ * older ones carry only the legacy `locationDetails` prose. Falling back keeps
+ * the pre-purok records rendering without a migration or a special case.
+ */
+export function formatIncidentLocation(
+  record: Pick<IncidentRecord, "purok" | "landmark" | "locationDetails">,
+): string {
+  const structured = [record.purok, record.landmark]
+    .map((part) => part?.trim())
+    .filter((part): part is string => !!part)
+    .join(" — ");
+
+  return structured || record.locationDetails?.trim() || "";
+}
+
 /** An announcement record. */
-export interface AnnouncementRecord {
+export interface AnnouncementRecord extends ArchiveMetadata {
   _id?: string;
   announcementId: string;
   titleText: string;
@@ -194,7 +290,14 @@ export interface OfficialRecord {
   officeLocation: string;
   coreResponsibilities?: string[];
   profileImageUrl?: string;
+  /** Soft-delete flag — archived officials are hidden from the directory. */
   isDeleted?: boolean;
+  /** Set alongside `isDeleted` when the official was archived. */
+  deletedAt?: string;
+  /** Admin id of the super admin who archived the official (audit only). */
+  archivedBy?: string;
+  /** Optional note recorded when the official was archived. */
+  archivedReason?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -214,7 +317,7 @@ export interface NotificationRecord {
 }
 
 /** A chat session record. */
-export interface ChatSessionRecord {
+export interface ChatSessionRecord extends ArchiveMetadata {
   _id?: string;
   sessionId: string;
   incidentId: string;
@@ -298,19 +401,30 @@ export interface AdminRecord {
   updatedAt?: string;
 }
 
-/** Fetch all residents (admin sees all; backend scopes by role). */
-export async function fetchResidents(): Promise<ResidentRecord[]> {
+/**
+ * Fetch residents (admin sees all; backend scopes by role).
+ *
+ * `scope` must stay "active" for every caller except the SUPER_ADMIN Archived
+ * toggle — the backend 403s any other role that asks for `archived`.
+ */
+export async function fetchResidents(
+  scope: ArchiveScope = "active",
+): Promise<ResidentRecord[]> {
   try {
-    return await getApi<ResidentRecord[]>("residents");
+    return await getApi<ResidentRecord[]>(withScope("residents", scope));
   } catch {
     return [];
   }
 }
 
-/** Fetch all document requests, newest first. */
-export async function fetchDocumentRequests(): Promise<DocumentQueueRecord[]> {
+/** Fetch document requests, newest first. */
+export async function fetchDocumentRequests(
+  scope: ArchiveScope = "active",
+): Promise<DocumentQueueRecord[]> {
   try {
-    const records = await getApi<DocumentQueueRecord[]>("document-requests");
+    const records = await getApi<DocumentQueueRecord[]>(
+      withScope("document-requests", scope),
+    );
     return records.sort(
       (a, b) =>
         new Date(b.dateRequested).getTime() -
@@ -350,28 +464,48 @@ export async function updateDocumentRequest(
   );
 }
 
-/** Fetch all incident reports (admin sees all; backend scopes by role). */
-export async function fetchIncidentReports(): Promise<IncidentRecord[]> {
+/** Fetch incident reports, newest first (admin sees all; backend scopes by role). */
+export async function fetchIncidentReports(
+  scope: ArchiveScope = "active",
+): Promise<IncidentRecord[]> {
   try {
-    return await getApi<IncidentRecord[]>("incident-reports");
+    const records = await getApi<IncidentRecord[]>(
+      withScope("incident-reports", scope),
+    );
+    // Newest first, mirroring `fetchDocumentRequests`. `reportedAt` is the
+    // backend's indexed sort key and is the one date every record carries, so a
+    // freshly filed report lands at the top instead of wherever Mongo's natural
+    // order happens to put it. `|| 0` keeps a record missing the date last
+    // rather than poisoning the comparator with NaN.
+    return records.sort(
+      (a, b) =>
+        new Date(b.reportedAt || 0).getTime() -
+        new Date(a.reportedAt || 0).getTime(),
+    );
   } catch {
     return [];
   }
 }
 
-/** Fetch all announcements, newest first (backend already sorts). */
-export async function fetchAnnouncements(): Promise<AnnouncementRecord[]> {
+/** Fetch announcements, newest first (backend already sorts). */
+export async function fetchAnnouncements(
+  scope: ArchiveScope = "active",
+): Promise<AnnouncementRecord[]> {
   try {
-    return await getApi<AnnouncementRecord[]>("announcements");
+    return await getApi<AnnouncementRecord[]>(
+      withScope("announcements", scope),
+    );
   } catch {
     return [];
   }
 }
 
-/** Fetch all active officials (backend excludes archived records). */
-export async function fetchOfficials(): Promise<OfficialRecord[]> {
+/** Fetch officials (backend excludes archived records unless asked). */
+export async function fetchOfficials(
+  scope: ArchiveScope = "active",
+): Promise<OfficialRecord[]> {
   try {
-    return await getApi<OfficialRecord[]>("officials");
+    return await getApi<OfficialRecord[]>(withScope("officials", scope));
   } catch {
     return [];
   }
@@ -431,6 +565,38 @@ export async function updateOfficial(
     `officials/${encodeURIComponent(id)}`,
     body,
   );
+}
+
+/**
+ * Archive a record (SUPER_ADMIN only).
+ *
+ * The actor and timestamp are stamped by the backend from the session, so this
+ * helper deliberately accepts neither — the client must not be able to claim who
+ * performed a governance action.
+ */
+export async function archiveRecord(
+  resource: ArchivableResource,
+  id: string,
+  reason?: string,
+): Promise<void> {
+  const note = reason?.trim();
+  await postApi<unknown>(`${resource}/${encodeURIComponent(id)}/archive`, {
+    ...(note ? { reason: note } : {}),
+  });
+}
+
+/**
+ * Restore an archived record (SUPER_ADMIN only).
+ *
+ * A body is sent even though the endpoint ignores it: `postApi` sets
+ * `Content-Type` only when there is one, and the Lambda proxy expects a JSON
+ * payload on this method.
+ */
+export async function restoreRecord(
+  resource: ArchivableResource,
+  id: string,
+): Promise<void> {
+  await postApi<unknown>(`${resource}/${encodeURIComponent(id)}/restore`, {});
 }
 
 /** Fetch all notifications, newest first (backend already sorts). */
@@ -737,10 +903,14 @@ export async function deleteNotification(id: string): Promise<void> {
   );
 }
 
-/** Fetch all chat sessions (admins see all), most recent activity first. */
-export async function fetchChatSessions(): Promise<ChatSessionRecord[]> {
+/** Fetch chat sessions (admins see all), most recent activity first. */
+export async function fetchChatSessions(
+  scope: ArchiveScope = "active",
+): Promise<ChatSessionRecord[]> {
   try {
-    return await getApi<ChatSessionRecord[]>("chat-sessions");
+    return await getApi<ChatSessionRecord[]>(
+      withScope("chat-sessions", scope),
+    );
   } catch {
     return [];
   }

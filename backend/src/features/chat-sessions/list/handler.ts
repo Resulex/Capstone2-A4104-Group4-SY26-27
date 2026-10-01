@@ -3,25 +3,35 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { ChatSession } from '../../../models';
-import { getAuthContext, residentRecordScopeFilter } from '../../../shared/authorization';
+import { resolveAuthContext, residentRecordScopeFilter } from '../../../shared/authorization';
+import { archiveScopeFilter } from '../../../shared/archive';
 import { staffStartedSessionIds } from '../../../shared/chat-sessions';
 
 /**
  * Chat Sessions — List
  * Use-case: list chat sessions. Residents see only their own, and only once a
  * staff member has started the conversation; admins see all responder sessions.
- * GET /chat-sessions (authenticated)
+ * Archived sessions are excluded unless a SUPER_ADMIN asks for `?scope=archived`.
+ * GET /chat-sessions?scope=active|archived (authenticated)
  */
 export async function listChatSessions(
   event: APIGatewayProxyEvent,
   _context: Context
 ): Promise<APIGatewayProxyResult> {
-  const auth = getAuthContext(event);
+  // `resolveAuthContext` (not `getAuthContext`): the archived scope needs the
+  // admin's `assignedRole`, which only the loaded Admin document carries.
+  const auth = await resolveAuthContext(event);
   await connectToDatabase();
 
   // Residents are scoped to their own sessions, minus anything that predates a
   // resident-initiated account deletion (see `residentRecordScopeFilter`).
-  const query = await residentRecordScopeFilter(auth);
+  const query = {
+    ...(await residentRecordScopeFilter(auth)),
+    // Archived threads leave the Live Chat queue for every role; only a
+    // SUPER_ADMIN can read them back. This is what keeps the "awaiting reply"
+    // badge from counting a conversation nobody can open.
+    ...archiveScopeFilter(event, auth),
+  };
 
   const sessions = await ChatSession.find(query).sort({ lastActivity: -1 }).lean();
 

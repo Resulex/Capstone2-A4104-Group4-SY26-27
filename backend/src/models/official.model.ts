@@ -10,6 +10,12 @@ export interface IOfficial extends Document {
   coreResponsibilities: string[];
   profileImageUrl?: string;
   isDeleted: boolean; // Soft-delete flag for historical archiving
+  /** Set alongside `isDeleted` when the official was archived. */
+  deletedAt?: Date;
+  /** Admin `_id` of the super admin who archived the official. */
+  archivedBy?: string;
+  /** Optional note recorded when the official was archived. */
+  archivedReason?: string;
   updatedAt: Date;
 }
 
@@ -31,6 +37,9 @@ const officialSchema = new Schema<IOfficial>(
     coreResponsibilities: { type: [String], default: [] },
     profileImageUrl: { type: String, trim: true },
     isDeleted: { type: Boolean, default: false },
+    deletedAt: { type: Date },
+    archivedBy: { type: String, trim: true },
+    archivedReason: { type: String, trim: true },
   },
   { timestamps: true }
 );

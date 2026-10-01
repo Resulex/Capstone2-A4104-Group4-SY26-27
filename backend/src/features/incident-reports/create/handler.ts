@@ -4,6 +4,7 @@ import { withErrorHandling, parseBody } from '../../../shared/handler';
 import { created, badRequest } from '../../../shared/responses';
 import { badRequestError } from '../../../shared/errors';
 import { parseCoordinates } from '../../../shared/coordinates';
+import { assertPurokInBarangay, resolveBarangayPuroks } from '../../../shared/puroks';
 import { IncidentReport, Resident } from '../../../models';
 import {
   getAuthContext,
@@ -27,6 +28,17 @@ interface CreateIncidentBody {
     | 'Public Disturbance'
     | 'Other';
   descriptionText?: string;
+  /**
+   * The purok the incident is in. Must name one of the reporting resident's
+   * barangay's puroks; the handler stores the barangay's own spelling.
+   */
+  purok?: string;
+  /** Free-text landmark/house note supplementing `purok`. */
+  landmark?: string;
+  /**
+   * Legacy free-text address. Still accepted so an older client does not fail
+   * confusingly, but no longer honored — `purok` is what gets validated.
+   */
   locationDetails?: string;
   /** Pinned location from the incident map picker, when the resident used it. */
   latitude?: number;
@@ -99,7 +111,7 @@ export async function createIncidentReport(
   const auth = getAuthContext(event);
   const body = parseBody(event) as CreateIncidentBody;
 
-  const { incidentCategory, descriptionText, locationDetails } = body;
+  const { incidentCategory, descriptionText } = body;
   // Throws a 400 for a half-filled or out-of-range pin; returns `undefined`
   // when the resident only typed an address (records predating the picker).
   const coordinates = parseCoordinates(body.latitude, body.longitude);
@@ -112,9 +124,9 @@ export async function createIncidentReport(
   const effectiveResidentId =
     body.residentId || (auth.role === 'admin' ? undefined : auth.userId);
 
-  if (!effectiveResidentId || !incidentCategory || !descriptionText || !locationDetails) {
+  if (!effectiveResidentId || !incidentCategory || !descriptionText || !body.purok) {
     return badRequest(
-      'residentId, incidentCategory, descriptionText, and locationDetails are required.'
+      'residentId, incidentCategory, descriptionText, and purok are required.'
     );
   }
 
@@ -143,6 +155,13 @@ export async function createIncidentReport(
     throw badRequestError('Invalid residentId.');
   }
 
+  // The purok is checked against the RESIDENT's barangay, never the caller's, so
+  // an admin filing on someone's behalf is validated against the right
+  // vocabulary. Throws a 400 naming the valid puroks.
+  const puroks = await resolveBarangayPuroks(resident.barangay);
+  const purok = assertPurokInBarangay(body.purok, puroks);
+  const landmark = body.landmark?.trim() || undefined;
+
   const incidentId = await nextIncidentId();
   // Residents (and officials acting through the resident portal) always open a
   // report as Pending; only an admin filing on someone's behalf may set it.
@@ -155,7 +174,10 @@ export async function createIncidentReport(
     residentId: resident._id,
     incidentCategory,
     descriptionText,
-    locationDetails,
+    // Validated location. `locationDetails` is a legacy column the write path no
+    // longer sets — see the model.
+    purok,
+    landmark,
     latitude: coordinates?.latitude,
     longitude: coordinates?.longitude,
     // System-driven triage: priority is computed by rules, not chosen by a human.

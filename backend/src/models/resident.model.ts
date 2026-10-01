@@ -39,6 +39,10 @@ export interface IResident extends Document {
   /** Soft-delete flag: hidden from the Residents list, kept for history. */
   isDeleted: boolean;
   deletedAt?: Date; // set when the account is soft-deleted
+  /** Admin `_id` of the super admin who archived the account (audit only). */
+  archivedBy?: string;
+  /** Optional note recorded when the account was archived. */
+  archivedReason?: string;
   /**
    * Resident-INITIATED deletion request. Deliberately separate from
    * `isDeleted` (which is the admin soft-delete and blocks sign-in): this one
@@ -107,6 +111,8 @@ const residentSchema = new Schema<IResident>(
     isProvisioned: { type: Boolean, default: false },
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date },
+    archivedBy: { type: String, trim: true },
+    archivedReason: { type: String, trim: true },
     // Resident-initiated deletion. All optional, so existing records read as
     // "not deleted" without a backfill migration.
     deletionRequestedAt: { type: Date },

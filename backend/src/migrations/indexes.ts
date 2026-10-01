@@ -17,6 +17,9 @@ export const SEEDED_INDEXES: Record<string, IndexSpec[]> = {
     { name: 'idx_residents_name', key: { lastName: 1, firstName: 1 } },
     { name: 'idx_residents_purok', key: { streetPurokName: 1 } },
     { name: 'idx_residents_status', key: { accountStatus: 1 } },
+    // Serves the Residents page's Active/Archived (SUPER_ADMIN) scopes; the
+    // residents collection had no index on its soft-delete flag before.
+    { name: 'idx_residents_deleted', key: { isDeleted: 1 } },
     // Sparse: only resident-initiated deletions carry a date, and the daily
     // finalization sweep looks up exactly the records that do.
     { name: 'idx_residents_deletionScheduled', key: { deletionScheduledFor: 1 }, sparse: true },
@@ -33,6 +36,7 @@ export const SEEDED_INDEXES: Record<string, IndexSpec[]> = {
     { name: 'idx_announcements_author', key: { authorId: 1 } },
     { name: 'idx_announcements_priority', key: { priorityLevel: 1, createdAt: -1 } },
     { name: 'idx_announcements_hidden', key: { isHidden: 1 } },
+    { name: 'idx_announcements_archived', key: { isArchived: 1 } },
   ],
   officials: [
     { name: 'unique_officialId', key: { officialId: 1 }, unique: true },
@@ -45,6 +49,9 @@ export const SEEDED_INDEXES: Record<string, IndexSpec[]> = {
     { name: 'idx_docreq_resident', key: { residentId: 1 } },
     { name: 'idx_docreq_status', key: { currentStatus: 1 } },
     { name: 'idx_docreq_type_date', key: { documentType: 1, dateRequested: -1 } },
+    // Archived view sorts by the request date, so the compound key matches the
+    // one query that scans the whole archived set.
+    { name: 'idx_docreq_archived', key: { isArchived: 1, dateRequested: -1 } },
   ],
   incidentreports: [
     { name: 'unique_incidentId', key: { incidentId: 1 }, unique: true },
@@ -52,6 +59,8 @@ export const SEEDED_INDEXES: Record<string, IndexSpec[]> = {
     { name: 'idx_incident_status_priority', key: { incidentStatus: 1, triagePriority: 1 } },
     { name: 'idx_incident_category', key: { incidentCategory: 1 } },
     { name: 'idx_incident_reportedAt', key: { reportedAt: -1 } },
+    // Matches the list handler's sort, so the archived scope is a covering scan.
+    { name: 'idx_incident_archived', key: { isArchived: 1, reportedAt: -1 } },
   ],
   chatsessions: [
     { name: 'unique_sessionId', key: { sessionId: 1 }, unique: true },
@@ -60,6 +69,8 @@ export const SEEDED_INDEXES: Record<string, IndexSpec[]> = {
     { name: 'idx_session_admin', key: { adminId: 1 } },
     { name: 'idx_session_active', key: { incidentId: 1, isActive: 1 } },
     { name: 'idx_session_lastActivity', key: { lastActivity: -1 } },
+    // Matches the chat list handler's sort for the archived scope.
+    { name: 'idx_session_archived', key: { isArchived: 1, lastActivity: -1 } },
   ],
   messages: [
     { name: 'unique_messageId', key: { messageId: 1 }, unique: true },
@@ -77,11 +88,45 @@ export const SEEDED_INDEXES: Record<string, IndexSpec[]> = {
 };
 
 /**
+ * Mongo error codes that mean "an EQUIVALENT index already exists under a
+ * different name" (85 IndexOptionsConflict / 86 IndexKeySpecsConflict).
+ */
+const EQUIVALENT_INDEX_EXISTS = new Set([85, 86]);
+
+/**
  * Creates all indexes for every seeded collection.
+ *
+ * Each index is created INDIVIDUALLY and a clash with an already-equivalent
+ * index is tolerated, for two reasons:
+ *
+ * 1. `createIndexes` fails the whole batch on the first conflict, so one shadowed
+ *    name used to abort every migration that reused this helper.
+ * 2. The clash is expected. The Mongoose models declare `unique`/`sparse` fields
+ *    whose auto-generated names (`residentId_1`) legitimately shadow the
+ *    registry's (`unique_residentId`) — `verify-migrations.ts` matches on key +
+ *    options rather than name for exactly this reason, so treating a name
+ *    difference as fatal would contradict the project's own rule.
  */
 export async function createSeededIndexes(db: Db): Promise<void> {
   for (const [collection, indexes] of Object.entries(SEEDED_INDEXES)) {
-    await db.collection(collection).createIndexes(indexes);
+    for (const index of indexes) {
+      try {
+        await db.collection(collection).createIndex(index.key, {
+          name: index.name,
+          ...(index.unique ? { unique: true } : {}),
+          ...(index.sparse ? { sparse: true } : {}),
+        });
+      } catch (error) {
+        const code = (error as { code?: number } | null)?.code;
+        if (code !== undefined && EQUIVALENT_INDEX_EXISTS.has(code)) {
+          console.log(
+            `  note: ${collection}.${index.name} matches an existing index under another name; skipped.`
+          );
+          continue;
+        }
+        throw error;
+      }
+    }
   }
 }
 

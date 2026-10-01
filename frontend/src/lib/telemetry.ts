@@ -13,7 +13,11 @@ export interface IncidentReportRecord {
   incidentId: string;
   incidentCategory: string;
   descriptionText: string;
-  locationDetails: string;
+  /** Legacy free-text address; absent on reports with a validated `purok`. */
+  locationDetails?: string;
+  /** Validated purok, and the optional landmark note that supplements it. */
+  purok?: string | null;
+  landmark?: string | null;
   triagePriority: string;
   incidentStatus: string;
   reportedAt: string;

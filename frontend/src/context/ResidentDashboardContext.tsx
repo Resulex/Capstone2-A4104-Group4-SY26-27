@@ -19,6 +19,7 @@ import {
   markAllNotificationsRead,
   markNotificationsByReference,
   type DocumentQueueRecord,
+  type IncidentRecord,
   type NotificationRecord,
 } from "@/lib/admin";
 
@@ -31,8 +32,15 @@ interface ResidentDashboardContextValue {
   error: string | null;
   /** Re-run the initial fetch (e.g. after submitting a new request). */
   reload: () => void;
+  /**
+   * Quiet re-read: replaces the snapshot WITHOUT flipping `isLoading`, so a page
+   * that arrives on already-rendered data is never blanked into a skeleton.
+   */
+  refresh: () => Promise<void>;
   /** Optimistically prepend a newly created document request to shared state. */
   addDocumentRequestLocal: (record: DocumentQueueRecord) => void;
+  /** Optimistically prepend a newly created incident report to shared state. */
+  addIncidentReportLocal: (record: IncidentRecord) => void;
   /** Optimistically set a notification's read state in shared state. */
   setNotificationReadLocal: (id: string, isRead: boolean) => void;
   /** Optimistically prepend a real-time notification to shared state. */
@@ -99,6 +107,20 @@ export function ResidentDashboardProvider({ children }: { children: ReactNode })
     };
   }, [version]);
 
+  /**
+   * Re-read the whole snapshot in the background, leaving the loading state and
+   * the last good data alone. The aggregated fetch swallows per-endpoint errors,
+   * so this rarely rejects; if it ever does, keeping the previous snapshot beats
+   * blanking a list the resident is already reading.
+   */
+  const refresh = useCallback(async () => {
+    try {
+      setData(await fetchResidentDashboardData());
+    } catch {
+      /* keep the previous snapshot */
+    }
+  }, []);
+
   const addDocumentRequestLocal = (record: DocumentQueueRecord) => {
     setData((prev) => {
       // Avoid duplicating a record that already exists in the snapshot (e.g.
@@ -108,6 +130,19 @@ export function ResidentDashboardProvider({ children }: { children: ReactNode })
       );
       if (exists) return prev;
       return { ...prev, documentRequests: [record, ...prev.documentRequests] };
+    });
+  };
+
+  const addIncidentReportLocal = (record: IncidentRecord) => {
+    setData((prev) => {
+      // Same guard as document requests: the refetch in `reload()` may already
+      // have inserted the record, and a second card with the same key (or a
+      // duplicate row in the unread filter) is worse than a tiny delay.
+      const exists = prev.incidentReports.some(
+        (r) => r.incidentId === record.incidentId || r._id === record._id,
+      );
+      if (exists) return prev;
+      return { ...prev, incidentReports: [record, ...prev.incidentReports] };
     });
   };
 
@@ -179,7 +214,9 @@ export function ResidentDashboardProvider({ children }: { children: ReactNode })
     isLoading,
     error,
     reload: () => setVersion((v) => v + 1),
+    refresh,
     addDocumentRequestLocal,
+    addIncidentReportLocal,
     setNotificationReadLocal,
     addNotificationLocal,
     unreadIncidentIds,

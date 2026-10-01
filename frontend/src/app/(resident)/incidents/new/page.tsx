@@ -17,7 +17,8 @@ import Snackbar from "@mui/material/Snackbar";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import { PageHeader } from "@/components/resident/PageHeader";
 import { MediaUploader } from "@/components/shared/MediaUploader";
-import { useBarangayArea } from "@/hooks/useBarangayArea";
+import { useResidentDashboard } from "@/context/ResidentDashboardContext";
+import { useBarangay } from "@/hooks/useBarangay";
 import type { Coordinates } from "@/lib/geo";
 import {
   INCIDENT_CATEGORIES,
@@ -44,41 +45,97 @@ const LocationPicker = dynamic(
  * `POST /incident-reports` and routes to the new report's detail page. The
  * backend's rule-based triage engine assigns the priority on submission.
  *
- * The location is captured twice: as a pin on an OpenStreetMap map (stored as
- * `latitude`/`longitude`, and what responders navigate to) and as a short
- * written description. The pin is optional so a resident can still file if the
- * map cannot load, but `locationDetails` is required by the backend because the
- * admin queues render it as text.
+ * The location is captured two ways. The `purok` is a required selection from
+ * the resident's own barangay vocabulary, and is what the backend validates — so
+ * a report cannot claim a location the barangay does not cover. The optional
+ * `landmark` is free text (`behind the chapel`, `house 12`) and carries the
+ * human detail a purok name cannot. A map pin is captured too (stored as
+ * `latitude`/`longitude`, and what responders navigate to), but it stays
+ * optional so a resident can still file when the map cannot load.
  */
+
+/** Field-level problems, keyed by the input they belong to. */
+type FieldErrors = Partial<
+  Record<"incidentCategory" | "descriptionText" | "purok", string>
+>;
+
 export default function NewIncidentReportPage() {
   const router = useRouter();
+  const { reload, addIncidentReportLocal } = useResidentDashboard();
 
   const [incidentCategory, setIncidentCategory] = useState("");
   const [descriptionText, setDescriptionText] = useState("");
-  const [locationDetails, setLocationDetails] = useState("");
+  const [purok, setPurok] = useState("");
+  const [landmark, setLandmark] = useState("");
   const [locationPin, setLocationPin] = useState<Coordinates | null>(null);
   const [evidenceMediaUrls, setEvidenceMediaUrls] = useState<string[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successOpen, setSuccessOpen] = useState(false);
 
-  // Frames and clamps the incident map to the resident's own barangay.
-  const mapArea = useBarangayArea();
+  // Frames and clamps the incident map to the resident's own barangay, and
+  // supplies the purok vocabulary the location is chosen from.
+  const { area: mapArea, puroks, loading: barangayLoading } = useBarangay();
+  const puroksUnavailable = !barangayLoading && puroks.length === 0;
+
+  const purokHelp = barangayLoading
+    ? "Loading the purok list…"
+    : puroksUnavailable
+      ? "The purok list for this barangay is unavailable, so the location cannot be validated. Please try again later."
+      : (fieldErrors.purok ?? "Choose the purok where the incident happened.");
+
+  const clearFieldError = (field: keyof FieldErrors) => {
+    setFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  /**
+   * The form is `noValidate`, so the browser does not enforce the `required`
+   * props. Without this the resident only learns a field is missing from a
+   * generic server 400 after the whole request has been sent.
+   */
+  const validate = (): FieldErrors => {
+    const next: FieldErrors = {};
+    if (!incidentCategory) {
+      next.incidentCategory = "Choose the incident category.";
+    }
+    if (!descriptionText.trim()) {
+      next.descriptionText = "Describe what happened.";
+    }
+    if (!purok) {
+      next.purok = "Choose the purok where this happened.";
+    }
+    return next;
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+
+    const problems = validate();
+    setFieldErrors(problems);
+    if (Object.keys(problems).length > 0) return;
 
     setSubmitting(true);
     try {
       const created = await createIncidentReport({
         incidentCategory,
         descriptionText,
-        locationDetails,
+        purok,
+        landmark: landmark.trim() || undefined,
         latitude: locationPin?.latitude,
         longitude: locationPin?.longitude,
         evidenceMediaUrls,
       });
+      // Show the new report immediately in the shared list state, then refetch
+      // the dashboard snapshot so other surfaces stay consistent.
+      addIncidentReportLocal(created);
+      reload();
       setSuccessOpen(true);
       const target = created.incidentId ?? created._id;
       setTimeout(() => {
@@ -110,6 +167,12 @@ export default function NewIncidentReportPage() {
             </Alert>
           )}
 
+          {puroksUnavailable && (
+            <Alert severity="warning" sx={{ mb: 2.5 }}>
+              {"We could not load the purok list for this barangay, so the incident location cannot be validated right now. Please reload the page or try again later."}
+            </Alert>
+          )}
+
           <Box component="form" onSubmit={handleSubmit} noValidate>
             <Stack spacing={2.5}>
               <TextField
@@ -118,9 +181,16 @@ export default function NewIncidentReportPage() {
                 required
                 fullWidth
                 value={incidentCategory}
-                onChange={(e) => setIncidentCategory(e.target.value)}
+                onChange={(e) => {
+                  setIncidentCategory(e.target.value);
+                  clearFieldError("incidentCategory");
+                }}
+                error={!!fieldErrors.incidentCategory}
                 inputProps={{ "aria-label": "Incident category" }}
-                helperText="Choose the category that best fits the incident."
+                helperText={
+                  fieldErrors.incidentCategory ??
+                  "Choose the category that best fits the incident."
+                }
               >
                 {INCIDENT_CATEGORIES.map((category) => (
                   <MenuItem key={category} value={category}>
@@ -136,9 +206,14 @@ export default function NewIncidentReportPage() {
                 multiline
                 minRows={4}
                 value={descriptionText}
-                onChange={(e) => setDescriptionText(e.target.value)}
+                onChange={(e) => {
+                  setDescriptionText(e.target.value);
+                  clearFieldError("descriptionText");
+                }}
+                error={!!fieldErrors.descriptionText}
                 inputProps={{ "aria-label": "Incident description" }}
                 placeholder="Describe what happened…"
+                helperText={fieldErrors.descriptionText}
               />
 
               {/* Pin the exact spot. The map is clamped to the barangay, and
@@ -158,15 +233,40 @@ export default function NewIncidentReportPage() {
                 />
               </Box>
 
+              {/* The validated half of the location. The purok must be one the
+                  resident's barangay recognises, which is what makes the
+                  location enforceable instead of free text. */}
               <TextField
-                label="Location Details"
+                select
+                label="Purok"
                 required
                 fullWidth
-                value={locationDetails}
-                onChange={(e) => setLocationDetails(e.target.value)}
-                inputProps={{ "aria-label": "Incident location" }}
-                placeholder="Street, Landmark, Purok…"
-                helperText="Describe the spot in words (street, landmark, purok). Responders read this alongside the pinned map location."
+                value={purok}
+                disabled={barangayLoading || puroksUnavailable}
+                onChange={(e) => {
+                  setPurok(e.target.value);
+                  clearFieldError("purok");
+                }}
+                error={!!fieldErrors.purok || puroksUnavailable}
+                inputProps={{ "aria-label": "Purok" }}
+                helperText={purokHelp}
+              >
+                {puroks.map((option) => (
+                  <MenuItem key={option} value={option}>
+                    {option}
+                  </MenuItem>
+                ))}
+              </TextField>
+
+              {/* The human half: a purok name alone rarely pinpoints a spot. */}
+              <TextField
+                label="Landmark / House No."
+                fullWidth
+                value={landmark}
+                onChange={(e) => setLandmark(e.target.value)}
+                inputProps={{ "aria-label": "Landmark or house number" }}
+                placeholder="House 12, near the covered court…"
+                helperText="Optional. Add a street, house number or nearby landmark so responders can find the exact spot."
               />
 
               {/* Evidence media (uploaded via S3 presigned URLs). */}
@@ -207,7 +307,7 @@ export default function NewIncidentReportPage() {
                 color="primary"
                 size="large"
                 fullWidth
-                disabled={submitting}
+                disabled={submitting || barangayLoading || puroksUnavailable}
               >
                 {submitting ? "Submitting…" : "Submit Report"}
               </Button>

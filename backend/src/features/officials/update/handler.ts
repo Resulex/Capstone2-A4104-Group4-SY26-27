@@ -18,6 +18,11 @@ interface UpdateOfficialBody {
   officeLocation?: string;
   coreResponsibilities?: string[];
   profileImageUrl?: string;
+  /**
+   * No longer writable here. Archiving moved to `POST /officials/{id}/archive`
+   * so it can be gated to SUPER_ADMIN and attributed. Declared so the request
+   * fails with a clear 400 rather than being silently dropped.
+   */
   isDeleted?: boolean;
 }
 
@@ -56,7 +61,16 @@ export async function updateOfficial(
   if (body.officeLocation !== undefined) official.officeLocation = body.officeLocation;
   if (body.coreResponsibilities !== undefined) official.coreResponsibilities = body.coreResponsibilities;
   if (body.profileImageUrl !== undefined) official.profileImageUrl = body.profileImageUrl;
-  if (body.isDeleted !== undefined) official.isDeleted = body.isDeleted;
+
+  // Archiving moved to `POST /officials/{id}/archive` (SUPER_ADMIN only) so the
+  // action is attributable — the old inline write recorded neither an actor nor
+  // a date. Rejected rather than ignored, for the reason given in the residents
+  // update handler.
+  if (body.isDeleted !== undefined) {
+    throw badRequestError(
+      'Use POST /officials/{id}/archive to archive an official (super admin only).'
+    );
+  }
 
   await official.save();
   return ok(official.toObject(), 'Official updated.');

@@ -650,6 +650,33 @@ functions:
             type: REQUEST
             resultTtlInSeconds: 0
             identitySource: method.request.header.Authorization
+  # Archive / restore (SUPER_ADMIN only). Three path segments, like
+  # `residents/me/deletion`, so `residents/{id}` can never shadow them.
+  # Pinned in `verify-routes.mjs`.
+  residents-archive:
+    handler: src/features/residents/archive/handler.archiveHandler
+    events:
+      - http:
+          path: residents/{id}/archive
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  residents-restore:
+    handler: src/features/residents/archive/handler.restoreHandler
+    events:
+      - http:
+          path: residents/{id}/restore
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
 
   # Daily backstop that stamps `deletionFinalizedAt` on resident-initiated
   # deletions whose 30-day grace window has elapsed. The ONLY scheduled function
@@ -789,6 +816,31 @@ functions:
             type: REQUEST
             resultTtlInSeconds: 0
             identitySource: method.request.header.Authorization
+  # Archive / restore (SUPER_ADMIN only). Pinned in `verify-routes.mjs`.
+  officials-archive:
+    handler: src/features/officials/archive/handler.archiveHandler
+    events:
+      - http:
+          path: officials/{id}/archive
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  officials-restore:
+    handler: src/features/officials/archive/handler.restoreHandler
+    events:
+      - http:
+          path: officials/{id}/restore
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
 
   # ---------------------------------------------------------------------------
   # Announcements — CRUD
@@ -847,6 +899,32 @@ functions:
       - http:
           path: announcements/{id}
           method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  # Archive / restore (SUPER_ADMIN only). Three path segments, so these cannot
+  # be shadowed by `announcements/{id}`. Pinned in `verify-routes.mjs`.
+  announcements-archive:
+    handler: src/features/announcements/archive/handler.archiveHandler
+    events:
+      - http:
+          path: announcements/{id}/archive
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  announcements-restore:
+    handler: src/features/announcements/archive/handler.restoreHandler
+    events:
+      - http:
+          path: announcements/{id}/restore
+          method: post
           cors: true
           authorizer:
             name: auth-jwt
@@ -917,6 +995,31 @@ functions:
             type: REQUEST
             resultTtlInSeconds: 0
             identitySource: method.request.header.Authorization
+  # Archive / restore (SUPER_ADMIN only). Pinned in `verify-routes.mjs`.
+  document-requests-archive:
+    handler: src/features/document-requests/archive/handler.archiveHandler
+    events:
+      - http:
+          path: document-requests/{id}/archive
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  document-requests-restore:
+    handler: src/features/document-requests/archive/handler.restoreHandler
+    events:
+      - http:
+          path: document-requests/{id}/restore
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
 
   # ---------------------------------------------------------------------------
   # Incident Reports — CRUD
@@ -975,6 +1078,31 @@ functions:
       - http:
           path: incident-reports/{id}
           method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  # Archive / restore (SUPER_ADMIN only). Pinned in `verify-routes.mjs`.
+  incident-reports-archive:
+    handler: src/features/incident-reports/archive/handler.archiveHandler
+    events:
+      - http:
+          path: incident-reports/{id}/archive
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  incident-reports-restore:
+    handler: src/features/incident-reports/archive/handler.restoreHandler
+    events:
+      - http:
+          path: incident-reports/{id}/restore
+          method: post
           cors: true
           authorizer:
             name: auth-jwt
@@ -1061,6 +1189,33 @@ functions:
       - http:
           path: chat-sessions/{id}
           method: delete
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  # Archive / restore (SUPER_ADMIN only). Archiving also clears `isActive`, so
+  # the thread leaves the Live Chat queue without losing any message.
+  # Pinned in `verify-routes.mjs`.
+  chat-sessions-archive:
+    handler: src/features/chat-sessions/archive/handler.archiveHandler
+    events:
+      - http:
+          path: chat-sessions/{id}/archive
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  chat-sessions-restore:
+    handler: src/features/chat-sessions/archive/handler.restoreHandler
+    events:
+      - http:
+          path: chat-sessions/{id}/restore
+          method: post
           cors: true
           authorizer:
             name: auth-jwt
