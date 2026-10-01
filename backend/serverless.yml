@@ -132,6 +132,10 @@ provider:
             - "arn:aws:cognito-idp:${env:AWS_REGION, 'ap-southeast-1'}:*:userpool/*"
 
 plugins:
+  # Keeps the compiled template under CloudFormation's 500-resource ceiling
+  # (534/500 broke the 2026-10-01 deploy) and fails with an actionable message
+  # if it ever creeps close again. See the file header for the full breakdown.
+  - ./scripts/serverless/cloudformation-budget.js
   - serverless-esbuild
   - serverless-offline
 
