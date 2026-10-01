@@ -3,22 +3,29 @@ import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
 import { Official } from '../../../models';
-import { getAuthContext } from '../../../shared/authorization';
+import { resolveAuthContext } from '../../../shared/authorization';
+import { archiveScopeFilter } from '../../../shared/archive';
 
 /**
  * Officials — List
  * Use-case: list officials (directory). Any authenticated user may read.
- * Soft-deleted (archived) officials are excluded.
- * GET /officials (authenticated)
+ * Archived (soft-deleted) officials are excluded unless a SUPER_ADMIN asks for
+ * `?scope=archived`.
+ * GET /officials?scope=active|archived (authenticated)
  */
 export async function listOfficials(
   event: APIGatewayProxyEvent,
   _context: Context
 ): Promise<APIGatewayProxyResult> {
-  getAuthContext(event);
+  // `resolveAuthContext` (not `getAuthContext`): the archived scope needs the
+  // admin's `assignedRole`, which only the loaded Admin document carries.
+  const auth = await resolveAuthContext(event);
   await connectToDatabase();
 
-  const officials = await Official.find({ isDeleted: false }).lean();
+  // Officials predate the archive flag, so their soft-delete column is
+  // `isDeleted`. This also replaces the old strict `isDeleted: false` match with
+  // "not equal to true", which keeps records that predate the field visible.
+  const officials = await Official.find(archiveScopeFilter(event, auth, 'isDeleted')).lean();
   return ok(officials, 'Officials fetched.');
 }
 

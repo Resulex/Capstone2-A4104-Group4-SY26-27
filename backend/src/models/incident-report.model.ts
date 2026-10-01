@@ -77,6 +77,19 @@ export interface IIncidentReport extends Document {
   timeline: IIncidentTimeline[];
   /** Original report this one duplicates (`INC-...`), while status is Duplicate. */
   duplicateOfIncidentId?: string;
+  /**
+   * Soft-archive flag. Archiving is a SUPER_ADMIN-only governance action: the
+   * report leaves every normal queue (including the reporter's own list) and is
+   * retrievable only from the admin Archived view. Distinct from
+   * `incidentStatus`, which tracks operational progress and is never rewritten
+   * by archiving — the history stays intact.
+   */
+  isArchived: boolean;
+  archivedAt?: Date;
+  /** Admin `_id` of the super admin who archived the report. */
+  archivedBy?: string;
+  /** Optional note recorded when the report was archived. */
+  archivedReason?: string;
   reportedAt: Date;
   /** Set by the schema's `timestamps` option. */
   createdAt: Date;
@@ -159,6 +172,13 @@ const incidentReportSchema = new Schema<IIncidentReport>(
       index: true,
       sparse: true,
     },
+    // Soft-archive (SUPER_ADMIN only). `default: false` means new records always
+    // carry the flag; the `-archive-flags` migration backfills the older ones so
+    // the active-scope query never has to tolerate a missing field.
+    isArchived: { type: Boolean, default: false },
+    archivedAt: { type: Date },
+    archivedBy: { type: String, trim: true },
+    archivedReason: { type: String, trim: true },
     reportedAt: { type: Date, required: true, default: Date.now },
   },
   { timestamps: true }

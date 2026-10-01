@@ -23,10 +23,14 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
 import CampaignIcon from "@mui/icons-material/Campaign";
+import ArchiveIcon from "@mui/icons-material/Archive";
+import UnarchiveIcon from "@mui/icons-material/Unarchive";
 import EditIcon from "@mui/icons-material/Edit";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { AnnouncementDirtyDialog } from "@/components/admin/AnnouncementDirtyDialog";
+import { ArchiveConfirmDialog } from "@/components/admin/ArchiveConfirmDialog";
+import { ArchiveScopeToggle } from "@/components/admin/ArchiveScopeToggle";
 import {
   AnnouncementForm,
   AnnouncementFormValues,
@@ -36,10 +40,16 @@ import {
   toDateInputValue,
 } from "@/components/admin/AnnouncementForm";
 import { useAuth } from "@/context/AuthContext";
+import { useCanArchive } from "@/hooks/useCanArchive";
 import {
   AnnouncementRecord,
+  ArchiveScope,
+  archiveRecord,
   createAnnouncement,
   fetchAnnouncements,
+  isRecordArchived,
+  recordArchivedAt,
+  restoreRecord,
   updateAnnouncement,
 } from "@/lib/admin";
 
@@ -54,6 +64,14 @@ function formatDate(iso?: string): string {
   });
 }
 
+/** "Archived 12 Mar 2026 — reason" line shown under an archived row's title. */
+function archivedLabel(record: AnnouncementRecord): string {
+  const at = recordArchivedAt(record);
+  const reason = record.archivedReason?.trim();
+  const when = at ? `Archived ${formatDate(at)}` : "Archived";
+  return reason ? `${when} — ${reason}` : when;
+}
+
 /**
  * Admin Announcements page — lists all announcements (including hidden ones)
  * and lets an admin publish new ones, edit existing announcements through the
@@ -62,8 +80,15 @@ function formatDate(iso?: string): string {
 export default function AnnouncementsPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
+  const { canArchive } = useCanArchive();
 
   const [announcements, setAnnouncements] = useState<AnnouncementRecord[]>([]);
+  /** Active or archived slice of the collection; archived is SUPER_ADMIN only. */
+  const [scope, setScope] = useState<ArchiveScope>("active");
+  /** Row awaiting archive/restore confirmation. */
+  const [pendingArchive, setPendingArchive] = useState<
+    { announcement: AnnouncementRecord; action: "archive" | "restore" } | null
+  >(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -95,9 +120,12 @@ export default function AnnouncementsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    setIsLoading(true);
     (async () => {
       try {
-        const data = await fetchAnnouncements();
+        // The scope is part of the request: an archived record is not merely
+        // filtered out client-side, it is never sent to a non-super admin.
+        const data = await fetchAnnouncements(scope);
         if (!cancelled) setAnnouncements(data);
       } catch (err) {
         if (!cancelled) {
@@ -112,7 +140,7 @@ export default function AnnouncementsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scope]);
 
   const handleUpdate = async (
     announcement: AnnouncementRecord,
@@ -144,6 +172,57 @@ export default function AnnouncementsPage() {
     setEditingId(null);
     setDirty(false);
     setPendingAction(null);
+  };
+
+  /**
+   * Switch between the active and archived slices.
+   *
+   * The draft form is reset as well: leaving the active slice while an
+   * announcement is loaded for editing would keep a record on screen that the
+   * current scope no longer contains.
+   */
+  const handleScopeChange = (next: ArchiveScope) => {
+    setScope(next);
+    setActionError(null);
+    resetToPublish();
+  };
+
+  /** Archive or restore the row awaiting confirmation, then drop it from view. */
+  const handleArchiveAction = async (reason?: string) => {
+    const target = pendingArchive;
+    if (!target) return;
+    setPendingId(target.announcement.announcementId);
+    setActionError(null);
+    try {
+      if (target.action === "archive") {
+        await archiveRecord(
+          "announcements",
+          target.announcement.announcementId,
+          reason,
+        );
+        setSuccessMessage("Announcement archived.");
+      } else {
+        await restoreRecord("announcements", target.announcement.announcementId);
+        setSuccessMessage("Announcement restored.");
+      }
+      // The record no longer belongs to the visible scope, so drop the row
+      // rather than refetching the whole list for a single change.
+      setAnnouncements((prev) =>
+        prev.filter(
+          (a) => a.announcementId !== target.announcement.announcementId,
+        ),
+      );
+      if (editingId === target.announcement.announcementId) resetToPublish();
+      setPendingArchive(null);
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "Failed to update the archive state.",
+      );
+    } finally {
+      setPendingId(null);
+    }
   };
 
   /** Apply a partial change to the shared form and mark it dirty. */
@@ -256,14 +335,35 @@ export default function AnnouncementsPage() {
     return null;
   }
 
+  /** True while showing the archived slice; all rows are archived then. */
+  const isArchivedView = scope === "archived";
+
   return (
     <Box>
-      <Typography variant="h5" component="h2" gutterBottom>
-        Announcements
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Manage community announcements and their visibility.
-      </Typography>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        justifyContent="space-between"
+        spacing={2}
+        sx={{ mb: 3 }}
+      >
+        <Box>
+          <Typography variant="h5" component="h2" gutterBottom>
+            Announcements
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {isArchivedView
+              ? "Archived announcements are retired from the public feed. Restore one to publish it again."
+              : "Manage community announcements and their visibility."}
+          </Typography>
+        </Box>
+        <ArchiveScopeToggle
+          scope={scope}
+          onChange={handleScopeChange}
+          label="announcements"
+          disabled={isLoading}
+        />
+      </Stack>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -338,6 +438,16 @@ export default function AnnouncementsPage() {
                       </TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>
                         {announcement.titleText}
+                        {isArchivedView && (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            display="block"
+                            sx={{ fontWeight: 400 }}
+                          >
+                            {archivedLabel(announcement)}
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Typography
@@ -370,9 +480,21 @@ export default function AnnouncementsPage() {
                       </TableCell>
                       <TableCell>
                         <Chip
-                          label={announcement.isHidden ? "Hidden" : "Published"}
+                          label={
+                            isRecordArchived(announcement)
+                              ? "Archived"
+                              : announcement.isHidden
+                                ? "Hidden"
+                                : "Published"
+                          }
                           size="small"
-                          color={announcement.isHidden ? "default" : "success"}
+                          color={
+                            isRecordArchived(announcement)
+                              ? "warning"
+                              : announcement.isHidden
+                                ? "default"
+                                : "success"
+                          }
                           variant="outlined"
                         />
                       </TableCell>
@@ -384,36 +506,69 @@ export default function AnnouncementsPage() {
                       </TableCell>
                       <TableCell>
                         <Stack direction="row" spacing={1}>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            startIcon={<EditIcon />}
-                            onClick={() => handleEdit(announcement)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color={
-                              announcement.isHidden ? "primary" : "inherit"
-                            }
-                            startIcon={
-                              announcement.isHidden ? (
-                                <VisibilityIcon />
-                              ) : (
-                                <VisibilityOffIcon />
-                              )
-                            }
-                            disabled={pendingId === announcement.announcementId}
-                            onClick={() =>
-                              handleUpdate(announcement, {
-                                isHidden: !announcement.isHidden,
-                              })
-                            }
-                          >
-                            {announcement.isHidden ? "Unhide" : "Hide"}
-                          </Button>
+                          {isArchivedView ? (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<UnarchiveIcon />}
+                              disabled={pendingId === announcement.announcementId}
+                              onClick={() =>
+                                setPendingArchive({ announcement, action: "restore" })
+                              }
+                            >
+                              Restore
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<EditIcon />}
+                                onClick={() => handleEdit(announcement)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color={
+                                  announcement.isHidden ? "primary" : "inherit"
+                                }
+                                startIcon={
+                                  announcement.isHidden ? (
+                                    <VisibilityIcon />
+                                  ) : (
+                                    <VisibilityOffIcon />
+                                  )
+                                }
+                                disabled={pendingId === announcement.announcementId}
+                                onClick={() =>
+                                  handleUpdate(announcement, {
+                                    isHidden: !announcement.isHidden,
+                                  })
+                                }
+                              >
+                                {announcement.isHidden ? "Unhide" : "Hide"}
+                              </Button>
+                              {canArchive && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="warning"
+                                  startIcon={<ArchiveIcon />}
+                                  disabled={pendingId === announcement.announcementId}
+                                  onClick={() =>
+                                    setPendingArchive({
+                                      announcement,
+                                      action: "archive",
+                                    })
+                                  }
+                                >
+                                  Archive
+                                </Button>
+                              )}
+                            </>
+                          )}
                         </Stack>
                       </TableCell>
                     </TableRow>
@@ -443,6 +598,15 @@ export default function AnnouncementsPage() {
         open={pendingAction !== null}
         onDiscard={handleDiscard}
         onKeep={handleKeep}
+      />
+
+      <ArchiveConfirmDialog
+        open={pendingArchive !== null}
+        action={pendingArchive?.action ?? "archive"}
+        subject={`Announcement "${pendingArchive?.announcement.titleText ?? ""}"`}
+        busy={pendingId !== null}
+        onConfirm={handleArchiveAction}
+        onCancel={() => setPendingArchive(null)}
       />
     </Box>
   );

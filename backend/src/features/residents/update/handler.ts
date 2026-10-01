@@ -25,7 +25,12 @@ interface UpdateResidentBody {
   accountStatus?: 'active' | 'suspended' | 'deactivated';
   /** Optional admin note explaining the account action (staff/admin only). */
   statusReason?: string;
-  /** Soft-delete flag (staff/admin only). */
+  /**
+   * No longer writable here. Archiving moved to `POST /residents/{id}/archive`
+   * so it can be gated to SUPER_ADMIN and attributed. The field is still
+   * declared so such a request fails with a clear 400 instead of being silently
+   * dropped.
+   */
   isDeleted?: boolean;
   /** Record Terms + Data Privacy consent (resident self-service only). */
   acceptTerms?: boolean;
@@ -73,8 +78,8 @@ export async function updateResident(
   if (body.streetPurokName !== undefined) resident.streetPurokName = body.streetPurokName;
   if (body.profileImageUrl !== undefined) resident.profileImageUrl = body.profileImageUrl;
 
-  // Only staff/admin may change account status, the status reason, or the
-  // soft-delete flag. Mirrors the officials update handler's `isDeleted`.
+  // Only staff/admin may change account status or the status reason. Mirrors the
+  // officials update handler.
   if (auth.role !== 'resident') {
     if (body.accountStatus !== undefined) {
       resident.accountStatus = body.accountStatus;
@@ -82,10 +87,17 @@ export async function updateResident(
     if (body.statusReason !== undefined) {
       resident.statusReason = body.statusReason;
     }
-    if (body.isDeleted !== undefined) {
-      resident.isDeleted = body.isDeleted;
-      resident.deletedAt = body.isDeleted ? new Date() : undefined;
-    }
+  }
+
+  // Archiving is deliberately NOT a generic update any more. It used to be a
+  // bare `isDeleted` write here, which meant any staff or admin could archive a
+  // resident and nothing recorded who did it or why. It now lives in the
+  // dedicated SUPER_ADMIN-guarded archive endpoint, and the field is rejected
+  // rather than ignored — a silent no-op would look like a successful archive.
+  if (body.isDeleted !== undefined) {
+    throw badRequestError(
+      'Use POST /residents/{id}/archive to archive a resident record (super admin only).'
+    );
   }
 
   // Re-derive read-only address if barangay changes (staff/admin only).

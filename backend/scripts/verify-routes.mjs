@@ -94,6 +94,22 @@ const REQUIRED_ROUTES = [
   { method: 'post', path: 'residents/me/deletion', auth: true, why: 'request permanent account deletion (starts the grace window)' },
   { method: 'get', path: 'residents/me/deletion', auth: true, why: 'read the caller’s own deletion state' },
   { method: 'delete', path: 'residents/me/deletion', auth: true, why: 'restore (cancel) a pending account deletion' },
+  // --- Soft archive / restore (SUPER_ADMIN only) ---
+  // These record types held no archive flag before, so every block here is new;
+  // a dropped block would not be a compile error, just a silent 404 on the
+  // Archived toggle the Super Admin uses to retrieve them. Pin all twelve.
+  { method: 'post', path: 'incident-reports/{id}/archive', auth: true, why: 'archive an incident report' },
+  { method: 'post', path: 'incident-reports/{id}/restore', auth: true, why: 'restore an archived incident report' },
+  { method: 'post', path: 'document-requests/{id}/archive', auth: true, why: 'archive a document request' },
+  { method: 'post', path: 'document-requests/{id}/restore', auth: true, why: 'restore an archived document request' },
+  { method: 'post', path: 'announcements/{id}/archive', auth: true, why: 'archive an announcement' },
+  { method: 'post', path: 'announcements/{id}/restore', auth: true, why: 'restore an archived announcement' },
+  { method: 'post', path: 'chat-sessions/{id}/archive', auth: true, why: 'archive a chat session (communications retention)' },
+  { method: 'post', path: 'chat-sessions/{id}/restore', auth: true, why: 'restore an archived chat session' },
+  { method: 'post', path: 'residents/{id}/archive', auth: true, why: 'archive a resident record' },
+  { method: 'post', path: 'residents/{id}/restore', auth: true, why: 'restore an archived resident record' },
+  { method: 'post', path: 'officials/{id}/archive', auth: true, why: 'archive a barangay official' },
+  { method: 'post', path: 'officials/{id}/restore', auth: true, why: 'restore an archived barangay official' },
 ];
 
 /**

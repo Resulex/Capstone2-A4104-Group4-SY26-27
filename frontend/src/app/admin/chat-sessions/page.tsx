@@ -18,22 +18,33 @@ import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import ForumIcon from "@mui/icons-material/Forum";
+import ArchiveIcon from "@mui/icons-material/Archive";
+import UnarchiveIcon from "@mui/icons-material/Unarchive";
 import SendIcon from "@mui/icons-material/Send";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useAuth } from "@/context/AuthContext";
 import { useAdminProfile } from "@/hooks/useAdminProfile";
+import { useCanArchive } from "@/hooks/useCanArchive";
+import { ArchiveConfirmDialog } from "@/components/admin/ArchiveConfirmDialog";
+import { ArchiveScopeToggle } from "@/components/admin/ArchiveScopeToggle";
 import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import {
+  ArchiveScope,
+  archiveRecord,
   ChatMessageRecord,
   ChatSessionRecord,
   IncidentRecord,
   ResidentRecord,
   chatSessionReferenceKeys,
+  fetchChatSessions,
   fetchIncidentReports,
   fetchResidents,
   hasUnreadReference,
+  isRecordArchived,
+  recordArchivedAt,
   needsReply,
+  restoreRecord,
   searchMessages,
   sendMessage,
   updateChatSession,
@@ -108,6 +119,22 @@ function ChatSessionsPageContent() {
   } = useAdminNotifications();
 
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
+  /**
+   * Active or archived slice. Archived is SUPER_ADMIN only.
+   *
+   * The ARCHIVED slice is deliberately kept in local state rather than in the
+   * shared notifications context: that context owns the LIVE queue the sidebar
+   * badge counts, and an archived thread must never be able to influence it.
+   */
+  const [scope, setScope] = useState<ArchiveScope>("active");
+  const [archivedSessions, setArchivedSessions] = useState<ChatSessionRecord[]>([]);
+  /** Session awaiting archive/restore confirmation. */
+  const [pendingArchive, setPendingArchive] = useState<
+    { session: ChatSessionRecord; action: "archive" | "restore" } | null
+  >(null);
+  const { canArchive } = useCanArchive();
+  /** True while showing the archived slice; archived threads are READ-ONLY. */
+  const isArchivedView = scope === "archived";
   const [residentNames, setResidentNames] = useState<Map<string, string>>(
     new Map(),
   );
@@ -184,6 +211,70 @@ function ChatSessionsPageContent() {
     sessionsRef.current = sessions;
   }, [sessions]);
 
+  /**
+   * Load the archived slice on demand.
+   *
+   * Only fetched when a Super Admin actually asks for it: the request 403s for
+   * any other role, and paying for it on every page load would be wasteful for
+   * the common case.
+   */
+  useEffect(() => {
+    if (scope !== "archived") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchChatSessions("archived");
+        if (!cancelled) setArchivedSessions(data);
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load archived chat sessions.",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scope]);
+
+  /** Archive or restore the session awaiting confirmation. */
+  const handleArchiveAction = async (reason?: string) => {
+    const target = pendingArchive;
+    if (!target) return;
+    setPendingSessionId(target.session.sessionId);
+    setActionError(null);
+    setNotice(null);
+    try {
+      if (target.action === "archive") {
+        await archiveRecord("chat-sessions", target.session.sessionId, reason);
+        setNotice("Chat session archived.");
+      } else {
+        await restoreRecord("chat-sessions", target.session.sessionId);
+        setNotice("Chat session restored.");
+      }
+      // The session no longer belongs to the visible scope.
+      setArchivedSessions((prev) =>
+        prev.filter((row) => row.sessionId !== target.session.sessionId),
+      );
+      setSelectedId(null);
+      setPendingArchive(null);
+      // The live queue is owned by the shared context, so ask it to re-read
+      // rather than trying to patch its state from here.
+      void refreshChatSessions();
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "Failed to update the archive state.",
+      );
+    } finally {
+      setPendingSessionId(null);
+    }
+  };
+
   // A thread that is open on screen is read: clear its unread reply as soon as
   // the notification arrives, rather than waiting for another row click. Guarded
   // by the unread set itself, so it fires once per reply instead of every poll.
@@ -215,7 +306,14 @@ function ChatSessionsPageContent() {
   }, [selectedId]);
 
   const selectedSession =
-    sessions.find((s) => s.sessionId === selectedId) ?? null;
+    sessions.find((s) => s.sessionId === selectedId) ??
+    archivedSessions.find((s) => s.sessionId === selectedId) ??
+    null;
+
+  /**
+   * The list the left panel renders: the live queue, or the archived slice.
+   */
+  const queueSessions = isArchivedView ? archivedSessions : sessions;
 
   /**
    * A session is awaiting a reply while no staff member has answered the
@@ -224,8 +322,13 @@ function ChatSessionsPageContent() {
    * Deliberately not this admin's unread notifications: that flag cannot tell a
    * teammate somebody else answered, so a session could be read by all staff and
    * answered by none.
+   *
+   * Archived threads are excluded from that question entirely: nobody owes a
+   * reply on a conversation that has been retired.
    */
-  const visibleSessions = unreadOnly ? sessions.filter(needsReply) : sessions;
+  const visibleSessions = unreadOnly
+    ? queueSessions.filter(needsReply)
+    : queueSessions;
   /**
    * This admin's own unread chat notifications, which only the bell-clearing
    * action below uses. It can stay above zero on a session that is already
@@ -405,12 +508,63 @@ function ChatSessionsPageContent() {
 
   return (
     <Box>
-      <Typography variant="h5" component="h2" gutterBottom>
-        Live Chat
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Manage resident chat sessions and respond to reports in real time.
-      </Typography>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        justifyContent="space-between"
+        spacing={2}
+        sx={{ mb: 3 }}
+      >
+        <Box>
+          <Typography variant="h5" component="h2" gutterBottom>
+            Live Chat
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {isArchivedView
+              ? "Archived conversations are read-only. Every message is retained; restore a session to reply again."
+              : "Manage resident chat sessions and respond to reports in real time."}
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1} alignItems="center">
+          {/* Archive acts on the SELECTED session, so the control sits next to
+              the scope switch rather than on every row. */}
+          {selectedSession &&
+            (isArchivedView ? (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<UnarchiveIcon />}
+                disabled={pendingSessionId !== null}
+                onClick={() =>
+                  setPendingArchive({ session: selectedSession, action: "restore" })
+                }
+              >
+                Restore
+              </Button>
+            ) : (
+              canArchive && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="warning"
+                  startIcon={<ArchiveIcon />}
+                  disabled={pendingSessionId !== null}
+                  onClick={() =>
+                    setPendingArchive({ session: selectedSession, action: "archive" })
+                  }
+                >
+                  Archive
+                </Button>
+              )
+            ))}
+          <ArchiveScopeToggle
+            scope={scope}
+            onChange={setScope}
+            label="chat sessions"
+            disabled={isLoading}
+          />
+        </Stack>
+      </Stack>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -436,7 +590,7 @@ function ChatSessionsPageContent() {
                 <Button
                   size="small"
                   variant={unreadOnly ? "contained" : "outlined"}
-                  disabled={awaitingReplyCount === 0}
+                  disabled={isArchivedView || awaitingReplyCount === 0}
                   onClick={() => setUnreadOnly((prev) => !prev)}
                 >
                   Awaiting reply ({awaitingReplyCount})
@@ -481,7 +635,9 @@ function ChatSessionsPageContent() {
                 >
                   {unreadOnly
                     ? "No sessions awaiting a reply."
-                    : "No chat sessions found."}
+                    : isArchivedView
+                      ? "No archived chat sessions."
+                      : "No chat sessions found."}
                 </Typography>
               ) : (
                 <List sx={{ pb: 2 }}>
@@ -508,7 +664,7 @@ function ChatSessionsPageContent() {
                             {residentNames.get(session.residentId) ??
                               session.sessionId}
                           </Typography>
-                          {needsReply(session) && (
+                          {needsReply(session) && !isRecordArchived(session) && (
                             <Chip
                               label="Awaiting reply"
                               size="small"
@@ -517,9 +673,21 @@ function ChatSessionsPageContent() {
                             />
                           )}
                           <Chip
-                            label={session.isActive ? "Active" : "Closed"}
+                            label={
+                              isRecordArchived(session)
+                                ? "Archived"
+                                : session.isActive
+                                  ? "Active"
+                                  : "Closed"
+                            }
                             size="small"
-                            color={session.isActive ? "success" : "default"}
+                            color={
+                              isRecordArchived(session)
+                                ? "warning"
+                                : session.isActive
+                                  ? "success"
+                                  : "default"
+                            }
                             variant="outlined"
                           />
                         </Stack>
@@ -711,6 +879,22 @@ function ChatSessionsPageContent() {
                     )}
                   </Box>
 
+                  {isArchivedView ? (
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ px: 3, py: 2 }}
+                    >
+                      Archived conversation — read-only. Select Restore above to
+                      reply again.
+                      {recordArchivedAt(selectedSession)
+                        ? ` Archived ${formatTime(recordArchivedAt(selectedSession))}.`
+                        : ""}
+                      {selectedSession?.archivedReason
+                        ? ` Reason: ${selectedSession.archivedReason}.`
+                        : ""}
+                    </Typography>
+                  ) : (
                   <Stack
                     direction="row"
                     spacing={1}
@@ -738,6 +922,7 @@ function ChatSessionsPageContent() {
                       Send
                     </Button>
                   </Stack>
+                  )}
                 </>
               )}
             </CardContent>
@@ -772,6 +957,20 @@ function ChatSessionsPageContent() {
           {actionError}
         </Alert>
       </Snackbar>
+
+      <ArchiveConfirmDialog
+        open={pendingArchive !== null}
+        action={pendingArchive?.action ?? "archive"}
+        subject={`Chat session ${
+          pendingArchive
+            ? residentNames.get(pendingArchive.session.residentId) ??
+              pendingArchive.session.sessionId
+            : ""
+        }`}
+        busy={pendingSessionId !== null}
+        onConfirm={handleArchiveAction}
+        onCancel={() => setPendingArchive(null)}
+      />
     </Box>
   );
 }

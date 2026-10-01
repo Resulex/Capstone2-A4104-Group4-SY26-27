@@ -17,12 +17,13 @@ import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
+import ArchiveIcon from "@mui/icons-material/Archive";
 import BlockIcon from "@mui/icons-material/Block";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import PauseCircleOutlineIcon from "@mui/icons-material/PauseCircleOutline";
 import {
+  archiveRecord,
   ResidentAccountStatus,
   ResidentRecord,
   updateResident,
@@ -89,12 +90,12 @@ const ACTIONS: ResidentAction[] = [
   },
   {
     key: "delete",
-    label: "Delete Account",
-    icon: <DeleteOutlineIcon fontSize="small" />,
-    title: "Delete resident account",
+    label: "Archive Account",
+    icon: <ArchiveIcon fontSize="small" />,
+    title: "Archive resident account",
     description:
-      "This soft-deletes the record: it disappears from the Residents list but is kept in the database. It cannot be restored from the app.",
-    confirmLabel: "Delete Account",
+      "The record leaves the Residents list but is kept in the database. A Super Admin can restore it from the Archived view at any time.",
+    confirmLabel: "Archive Account",
     color: "error",
     disabled: () => false,
   },
@@ -159,10 +160,22 @@ export function ResidentActionMenu({
     setSaving(true);
     setError(null);
     try {
-      const body: Partial<ResidentRecord> =
-        pending.accountStatus !== undefined
-          ? { accountStatus: pending.accountStatus }
-          : { isDeleted: true };
+      // Archiving is not a generic update any more: it goes through the
+      // SUPER_ADMIN-only archive endpoint, which is also the only path that can
+      // record who archived the account and why. The old `{ isDeleted: true }`
+      // PATCH is now rejected by the backend with a 400.
+      if (pending.accountStatus === undefined) {
+        await archiveRecord("residents", key, reason.trim() || undefined);
+        // The endpoint answers with no body, so mirror the change locally —
+        // the list only needs to know the row left the active scope.
+        onUpdated({ ...resident, isDeleted: true, deletedAt: new Date().toISOString() });
+        setPending(null);
+        return;
+      }
+
+      const body: Partial<ResidentRecord> = {
+        accountStatus: pending.accountStatus,
+      };
       if (reason.trim()) body.statusReason = reason.trim();
 
       const updated = await updateResident(key, body);

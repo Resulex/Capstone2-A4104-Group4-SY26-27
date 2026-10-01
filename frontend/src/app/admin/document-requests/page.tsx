@@ -31,18 +31,29 @@ import { alpha } from "@mui/material/styles";
 import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
 import DescriptionIcon from "@mui/icons-material/Description";
+import ArchiveIcon from "@mui/icons-material/Archive";
+import UnarchiveIcon from "@mui/icons-material/Unarchive";
 import HistoryIcon from "@mui/icons-material/History";
 import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
 import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
+import Chip from "@mui/material/Chip";
 import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 import { useAuth } from "@/context/AuthContext";
+import { useCanArchive } from "@/hooks/useCanArchive";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { TimelineSteps } from "@/components/shared/TimelineSteps";
+import { ArchiveConfirmDialog } from "@/components/admin/ArchiveConfirmDialog";
+import { ArchiveScopeToggle } from "@/components/admin/ArchiveScopeToggle";
 import {
+  ArchiveScope,
+  archiveRecord,
   DocumentQueueRecord,
   documentReferenceKeys,
   fetchDocumentRequests,
   hasUnreadReference,
+  isRecordArchived,
+  recordArchivedAt,
+  restoreRecord,
   updateDocumentRequest,
 } from "@/lib/admin";
 
@@ -97,6 +108,19 @@ function DocumentRequestsPageContent() {
   const { unreadDocumentIds, markRecordsRead } = useAdminNotifications();
 
   const [documents, setDocuments] = useState<DocumentQueueRecord[]>([]);
+  /** Active or archived slice of the queue; archived is SUPER_ADMIN only. */
+  const [scope, setScope] = useState<ArchiveScope>("active");
+  /**
+   * True while showing the archived slice. Archived requests are READ-ONLY
+   * here: archiving is about retrieval, so the status control is withheld rather
+   * than left to fail server-side.
+   */
+  const isArchivedView = scope === "archived";
+  /** Row awaiting archive/restore confirmation. */
+  const [pendingArchive, setPendingArchive] = useState<
+    { doc: DocumentQueueRecord; action: "archive" | "restore" } | null
+  >(null);
+  const { canArchive } = useCanArchive();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -199,9 +223,12 @@ function DocumentRequestsPageContent() {
 
   useEffect(() => {
     let cancelled = false;
+    setIsLoading(true);
     (async () => {
       try {
-        const data = await fetchDocumentRequests();
+        // The scope is part of the request, not a client-side filter: the
+        // backend refuses the archived slice for anyone but a Super Admin.
+        const data = await fetchDocumentRequests(scope);
         if (!cancelled) setDocuments(data);
       } catch (err) {
         if (!cancelled) {
@@ -218,7 +245,38 @@ function DocumentRequestsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scope]);
+
+  /** Archive or restore the request awaiting confirmation. */
+  const handleArchiveAction = async (reason?: string) => {
+    const target = pendingArchive;
+    if (!target) return;
+    setPendingId(target.doc.requestId);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      if (target.action === "archive") {
+        await archiveRecord("document-requests", target.doc.requestId, reason);
+        setActionSuccess("Document request archived.");
+      } else {
+        await restoreRecord("document-requests", target.doc.requestId);
+        setActionSuccess("Document request restored.");
+      }
+      // The row no longer belongs to the visible scope.
+      setDocuments((prev) =>
+        prev.filter((row) => row.requestId !== target.doc.requestId),
+      );
+      setPendingArchive(null);
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "Failed to update the archive state.",
+      );
+    } finally {
+      setPendingId(null);
+    }
+  };
 
   /**
    * Deep link from a notification (toast click-through or bell row): open the
@@ -283,12 +341,30 @@ function DocumentRequestsPageContent() {
 
   return (
     <Box>
-      <Typography variant="h5" component="h2" gutterBottom>
-        Document Requests
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Review and process incoming document requests.
-      </Typography>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        justifyContent="space-between"
+        spacing={2}
+        sx={{ mb: 3 }}
+      >
+        <Box>
+          <Typography variant="h5" component="h2" gutterBottom>
+            Document Requests
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {isArchivedView
+              ? "Archived requests are hidden from the queue. Restore one to process it again."
+              : "Review and process incoming document requests."}
+          </Typography>
+        </Box>
+        <ArchiveScopeToggle
+          scope={scope}
+          onChange={setScope}
+          label="document requests"
+          disabled={isLoading}
+        />
+      </Stack>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -451,6 +527,7 @@ function DocumentRequestsPageContent() {
                           <Select
                             value={doc.currentStatus}
                             disabled={
+                              isArchivedView ||
                               doc.currentStatus === "Released" ||
                               pendingId === doc.requestId
                             }
@@ -478,15 +555,66 @@ function DocumentRequestsPageContent() {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Tooltip title="View processing history">
-                          <IconButton
-                            size="small"
-                            aria-label={`View processing history for ${doc.requestId}`}
-                            onClick={() => setHistoryDoc(doc)}
-                          >
-                            <HistoryIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          {isRecordArchived(doc) && (
+                            <Tooltip
+                              title={[
+                                recordArchivedAt(doc)
+                                  ? `Archived ${formatDate(recordArchivedAt(doc)!)}`
+                                  : "Archived",
+                                doc.archivedReason?.trim()
+                                  ? `— ${doc.archivedReason.trim()}`
+                                  : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                            >
+                              <Chip
+                                label="Archived"
+                                size="small"
+                                color="warning"
+                                variant="outlined"
+                              />
+                            </Tooltip>
+                          )}
+                          <Tooltip title="View processing history">
+                            <IconButton
+                              size="small"
+                              aria-label={`View processing history for ${doc.requestId}`}
+                              onClick={() => setHistoryDoc(doc)}
+                            >
+                              <HistoryIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          {isArchivedView ? (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<UnarchiveIcon />}
+                              disabled={pendingId === doc.requestId}
+                              onClick={() =>
+                                setPendingArchive({ doc, action: "restore" })
+                              }
+                            >
+                              Restore
+                            </Button>
+                          ) : (
+                            canArchive && (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="warning"
+                                startIcon={<ArchiveIcon />}
+                                disabled={pendingId === doc.requestId}
+                                onClick={() =>
+                                  setPendingArchive({ doc, action: "archive" })
+                                }
+                              >
+                                Archive
+                              </Button>
+                            )
+                          )}
+                        </Stack>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -579,6 +707,15 @@ function DocumentRequestsPageContent() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ArchiveConfirmDialog
+        open={pendingArchive !== null}
+        action={pendingArchive?.action ?? "archive"}
+        subject={`Document request ${pendingArchive?.doc.requestId ?? ""}`}
+        busy={pendingId !== null}
+        onConfirm={handleArchiveAction}
+        onCancel={() => setPendingArchive(null)}
+      />
 
       <Snackbar
         open={Boolean(actionSuccess)}

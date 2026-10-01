@@ -39,6 +39,17 @@ export interface IChatSession extends Document {
    * trade-off as `timeline[].changedBy.fullName`.
    */
   lastStaffReplyByName?: string;
+  /**
+   * Soft-archive flag (SUPER_ADMIN only). Archived sessions keep their messages
+   * — messages are never deleted — but leave the Live Chat queue and are
+   * retrievable only from the admin Archived view.
+   */
+  isArchived: boolean;
+  archivedAt?: Date;
+  /** Admin `_id` of the super admin who archived the session. */
+  archivedBy?: string;
+  /** Optional note recorded when the session was archived. */
+  archivedReason?: string;
 }
 
 const deviceInfoSchema = new Schema<IDeviceInfo>(
@@ -83,6 +94,12 @@ const chatSessionSchema = new Schema<IChatSession>(
     lastStaffReplyAt: { type: Date },
     lastStaffReplyById: { type: Schema.Types.ObjectId, ref: 'Admin' },
     lastStaffReplyByName: { type: String, trim: true },
+    // Soft-archive (SUPER_ADMIN only). Restoring deliberately does NOT set
+    // `isActive` back to true: a restored session is history, not a live thread.
+    isArchived: { type: Boolean, default: false },
+    archivedAt: { type: Date },
+    archivedBy: { type: String, trim: true },
+    archivedReason: { type: String, trim: true },
   },
   { timestamps: true }
 );

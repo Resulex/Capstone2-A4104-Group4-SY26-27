@@ -80,6 +80,20 @@ export function parsePathParam(event: APIGatewayProxyEvent, name: string): strin
 }
 
 /**
+ * Parses the JSON body when one is present, and returns an empty object when it
+ * is absent.
+ *
+ * Use this for actions whose payload is optional — an archive note, for
+ * instance. `parseBody` would answer a bodyless request with a 400 that says
+ * nothing about what the caller actually got wrong, when the honest reading is
+ * "no body, no extra fields".
+ */
+export function parseOptionalBody(event: APIGatewayProxyEvent): Record<string, unknown> {
+  if (!event.body) return {};
+  return parseBody(event);
+}
+
+/**
  * Builds a "match by `_id` OR a custom identifier field" query that never
  * casts an invalid ObjectId. Custom ids such as `ann-001` would otherwise make
  * Mongoose throw a CastError when it tries to cast `_id` (surfacing as a 500

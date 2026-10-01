@@ -37,6 +37,8 @@ import Popover from "@mui/material/Popover";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import ArchiveIcon from "@mui/icons-material/Archive";
+import UnarchiveIcon from "@mui/icons-material/Unarchive";
 import ForumIcon from "@mui/icons-material/Forum";
 import HistoryIcon from "@mui/icons-material/History";
 import ImageIcon from "@mui/icons-material/Image";
@@ -46,7 +48,12 @@ import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 import { useAuth } from "@/context/AuthContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { TimelineSteps } from "@/components/shared/TimelineSteps";
+import { ArchiveConfirmDialog } from "@/components/admin/ArchiveConfirmDialog";
+import { ArchiveScopeToggle } from "@/components/admin/ArchiveScopeToggle";
+import { useCanArchive } from "@/hooks/useCanArchive";
 import {
+  ArchiveScope,
+  archiveRecord,
   IncidentRecord,
   ResidentRecord,
   fetchIncidentReports,
@@ -54,6 +61,9 @@ import {
   formatIncidentLocation,
   hasUnreadReference,
   incidentReferenceKeys,
+  isRecordArchived,
+  recordArchivedAt,
+  restoreRecord,
   updateIncidentReport,
 } from "@/lib/admin";
 import { coordinatesFrom } from "@/lib/geo";
@@ -202,6 +212,19 @@ function IncidentsPageContent() {
   const { unreadIncidentIds, markRecordsRead } = useAdminNotifications();
 
   const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
+  /** Active or archived slice of the queue; archived is SUPER_ADMIN only. */
+  const [scope, setScope] = useState<ArchiveScope>("active");
+  /**
+   * True while showing the archived slice. Archived reports are READ-ONLY in
+   * this view: archiving is about retrieval, so the status control and the
+   * triage-chat hand-off are withheld rather than left to fail server-side.
+   */
+  const isArchivedView = scope === "archived";
+  /** Row awaiting archive/restore confirmation. */
+  const [pendingArchive, setPendingArchive] = useState<
+    { incident: IncidentRecord; action: "archive" | "restore" } | null
+  >(null);
+  const { canArchive } = useCanArchive();
   const [reporterNames, setReporterNames] = useState<Map<string, string>>(
     new Map(),
   );
@@ -283,10 +306,13 @@ function IncidentsPageContent() {
 
   useEffect(() => {
     let cancelled = false;
+    setIsLoading(true);
     (async () => {
       try {
         const [incidentData, residentData] = await Promise.all([
-          fetchIncidentReports(),
+          // The scope is part of the request, not a client-side filter: the
+          // backend refuses the archived slice for anyone but a Super Admin.
+          fetchIncidentReports(scope),
           fetchResidents(),
         ]);
         if (!cancelled) {
@@ -308,7 +334,39 @@ function IncidentsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scope]);
+
+  /** Archive or restore the report awaiting confirmation. */
+  const handleArchiveAction = async (reason?: string) => {
+    const target = pendingArchive;
+    if (!target) return;
+    setPendingId(target.incident.incidentId);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      if (target.action === "archive") {
+        await archiveRecord("incident-reports", target.incident.incidentId, reason);
+        setActionSuccess("Incident report archived.");
+      } else {
+        await restoreRecord("incident-reports", target.incident.incidentId);
+        setActionSuccess("Incident report restored.");
+      }
+      // The row no longer belongs to the visible scope, so drop it instead of
+      // refetching the whole queue for a single change.
+      setIncidents((prev) =>
+        prev.filter((row) => row.incidentId !== target.incident.incidentId),
+      );
+      setPendingArchive(null);
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "Failed to update the archive state.",
+      );
+    } finally {
+      setPendingId(null);
+    }
+  };
 
   /**
    * Deep link from a notification (toast click-through or bell row): open the
@@ -537,6 +595,12 @@ function IncidentsPageContent() {
               spacing={1}
               sx={{ flexWrap: "wrap", rowGap: 1 }}
             >
+              <ArchiveScopeToggle
+                scope={scope}
+                onChange={setScope}
+                label="incident reports"
+                disabled={isLoading}
+              />
               <Button
                 size="small"
                 variant={unreadOnly ? "contained" : "outlined"}
@@ -729,7 +793,9 @@ function IncidentsPageContent() {
                           <Select
                             id={`status-${incident.incidentId}`}
                             value={incident.incidentStatus}
-                            disabled={pendingId === incident.incidentId}
+                            disabled={
+                              isArchivedView || pendingId === incident.incidentId
+                            }
                             onChange={(event: SelectChangeEvent) =>
                               openStatusModal(incident, event.target.value)
                             }
@@ -755,6 +821,27 @@ function IncidentsPageContent() {
                       </TableCell>
                       <TableCell>
                         <Stack direction="row" spacing={1} alignItems="center">
+                          {isRecordArchived(incident) && (
+                            <Tooltip
+                              title={[
+                                recordArchivedAt(incident)
+                                  ? `Archived ${formatDate(recordArchivedAt(incident)!)}`
+                                  : "Archived",
+                                incident.archivedReason?.trim()
+                                  ? `— ${incident.archivedReason.trim()}`
+                                  : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                            >
+                              <Chip
+                                label="Archived"
+                                size="small"
+                                color="warning"
+                                variant="outlined"
+                              />
+                            </Tooltip>
+                          )}
                           <Tooltip title="View status history">
                             <IconButton
                               size="small"
@@ -764,19 +851,52 @@ function IncidentsPageContent() {
                               <HistoryIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color="primary"
-                            startIcon={<ForumIcon />}
-                            onClick={() =>
-                              router.push(
-                                `/admin/chat-sessions?incident=${encodeURIComponent(incident.incidentId)}`,
-                              )
-                            }
-                          >
-                            Open Triage Chat
-                          </Button>
+                          {isArchivedView ? (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<UnarchiveIcon />}
+                              disabled={pendingId === incident.incidentId}
+                              onClick={() =>
+                                setPendingArchive({ incident, action: "restore" })
+                              }
+                            >
+                              Restore
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="primary"
+                                startIcon={<ForumIcon />}
+                                onClick={() =>
+                                  router.push(
+                                    `/admin/chat-sessions?incident=${encodeURIComponent(incident.incidentId)}`,
+                                  )
+                                }
+                              >
+                                Open Triage Chat
+                              </Button>
+                              {canArchive && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="warning"
+                                  startIcon={<ArchiveIcon />}
+                                  disabled={pendingId === incident.incidentId}
+                                  onClick={() =>
+                                    setPendingArchive({
+                                      incident,
+                                      action: "archive",
+                                    })
+                                  }
+                                >
+                                  Archive
+                                </Button>
+                              )}
+                            </>
+                          )}
                         </Stack>
                       </TableCell>
                     </TableRow>
@@ -950,6 +1070,15 @@ function IncidentsPageContent() {
         autoHideDuration={6000}
         onClose={() => setActionError(null)}
         message={actionError ?? ""}
+      />
+
+      <ArchiveConfirmDialog
+        open={pendingArchive !== null}
+        action={pendingArchive?.action ?? "archive"}
+        subject={`Incident report ${pendingArchive?.incident.incidentId ?? ""}`}
+        busy={pendingId !== null}
+        onConfirm={handleArchiveAction}
+        onCancel={() => setPendingArchive(null)}
       />
     </Box>
   );
