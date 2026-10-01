@@ -9,6 +9,10 @@ import { Admin, type IAdmin } from '../../../models';
 import { resolveAuthContext, requireAssignedRole } from '../../../shared/authorization';
 import { getCognitoGateway, cognitoReady } from '../../../shared/cognito';
 import {
+  contactNumberViolation,
+  normalizeContactNumber,
+} from '../../../shared/contact-number';
+import {
   appBaseUrl,
   emailFromAddress,
   emailReady,
@@ -111,8 +115,15 @@ export async function createAdmin(
   const body = parseBody(event) as CreateAdminBody;
   const { firstName, lastName, userName, emailAddress, phoneNumber } = body;
 
-  if (!firstName || !lastName || !userName || !emailAddress) {
-    return badRequest('firstName, lastName, userName, and emailAddress are required.');
+  if (!firstName || !lastName || !userName || !emailAddress || !phoneNumber) {
+    return badRequest(
+      'firstName, lastName, userName, emailAddress, and phoneNumber are required.'
+    );
+  }
+
+  const contactProblem = contactNumberViolation(phoneNumber, { required: true });
+  if (contactProblem) {
+    return badRequest(contactProblem);
   }
 
   await connectToDatabase();
@@ -137,7 +148,7 @@ export async function createAdmin(
     userName,
     emailAddress: emailAddress.toLowerCase(),
     passwordHash,
-    phoneNumber: phoneNumber?.trim() || undefined,
+    phoneNumber: normalizeContactNumber(phoneNumber ?? ''),
     assignedRole: body.assignedRole || 'OPERATIONS_CLERK',
     accountStatus: body.accountStatus || 'active',
   });

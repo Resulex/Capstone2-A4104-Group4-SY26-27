@@ -124,9 +124,10 @@ export default function NewIncidentReportPage() {
     if (!purok) {
       next.purok = "Choose the purok where this happened.";
     }
-    // Optional, so a blank value is fine; this only catches a malformed one at
-    // the submit boundary (the shared field already sanitizes as you type).
-    const contactProblem = contactNumberError(contactNumber);
+    // Required: responders need a number to call. The shared field already
+    // sanitizes as you type, so this only catches a blank/malformed value at
+    // the submit boundary.
+    const contactProblem = contactNumberError(contactNumber, { required: true });
     if (contactProblem) {
       next.contactNumber = contactProblem;
     }
@@ -240,19 +241,17 @@ export default function NewIncidentReportPage() {
               />
 
               {/* Carried on the report so responders can call the reporter
-                  without leaving the record. Optional: leaving it blank keeps
-                  the number already on the resident's profile. */}
+                  without leaving the record. Required — a valid 11-digit PH
+                  mobile starting with 09. */}
               <ContactNumberField
                 value={contactNumber}
                 onChange={(next) => {
                   setContactNumber(next);
                   clearFieldError("contactNumber");
                 }}
+                required
                 error={!!fieldErrors.contactNumber}
-                helperText={
-                  fieldErrors.contactNumber ??
-                  "Optional. Digits only, up to 11 digits — if left blank we will use the number on your profile."
-                }
+                helperText={fieldErrors.contactNumber}
               />
 
               {/* Pin the exact spot. The map is clamped to the barangay, and

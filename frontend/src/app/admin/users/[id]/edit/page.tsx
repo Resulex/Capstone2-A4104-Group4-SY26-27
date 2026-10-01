@@ -16,10 +16,12 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import { ContactNumberField } from "@/components/shared/ContactNumberField";
 import { useAuth } from "@/context/AuthContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { useAdminProfile } from "@/hooks/useAdminProfile";
 import { AdminRecord, fetchAdmin, updateAdmin } from "@/lib/admin";
+import { contactNumberError, normalizeContactNumber } from "@/lib/phone";
 import {
   ADMIN_ROLES,
   ADMIN_ROLE_LABELS,
@@ -90,7 +92,7 @@ export default function EditAdminPage() {
           firstName: data.firstName ?? "",
           lastName: data.lastName ?? "",
           middleName: data.middleName ?? "",
-          phoneNumber: data.phoneNumber ?? "",
+          phoneNumber: normalizeContactNumber(data.phoneNumber ?? ""),
           assignedRole: data.assignedRole,
         });
       } catch (err) {
@@ -137,6 +139,13 @@ export default function EditAdminPage() {
       setError("First and last name are required.");
       return;
     }
+    const contactProblem = contactNumberError(form.phoneNumber, {
+      required: true,
+    });
+    if (contactProblem) {
+      setError(contactProblem);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -144,7 +153,7 @@ export default function EditAdminPage() {
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
         middleName: form.middleName.trim(),
-        phoneNumber: form.phoneNumber.trim(),
+        phoneNumber: normalizeContactNumber(form.phoneNumber),
         assignedRole: form.assignedRole,
       });
       router.push(detailPath);
@@ -244,12 +253,12 @@ export default function EditAdminPage() {
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
-                <TextField
-                  label="Contact Number"
+                <ContactNumberField
                   value={form.phoneNumber}
-                  onChange={setField("phoneNumber")}
-                  fullWidth
-                  helperText="Optional. Stored in the database only — not used for MFA."
+                  onChange={(next) =>
+                    setForm((prev) => ({ ...prev, phoneNumber: next }))
+                  }
+                  required
                 />
               </Grid>
               <Grid item xs={12} sm={6}>

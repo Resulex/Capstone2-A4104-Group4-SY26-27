@@ -29,6 +29,7 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import VisibilityIcon from "@mui/icons-material/Visibility";
+import { ContactNumberField } from "@/components/shared/ContactNumberField";
 import { useAuth } from "@/context/AuthContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { useAdminProfile } from "@/hooks/useAdminProfile";
@@ -39,6 +40,7 @@ import {
   fetchAdmins,
   createAdmin,
 } from "@/lib/admin";
+import { contactNumberError, normalizeContactNumber } from "@/lib/phone";
 import { ADMIN_ROLES, ADMIN_ROLE_LABELS, AssignedAdminRole, getAdminLandingPath } from "@/lib/rbac";
 
 interface CreateFormState {
@@ -46,6 +48,7 @@ interface CreateFormState {
   lastName: string;
   userName: string;
   emailAddress: string;
+  phoneNumber: string;
   assignedRole: AssignedAdminRole;
 }
 
@@ -54,6 +57,7 @@ const EMPTY_FORM: CreateFormState = {
   lastName: "",
   userName: "",
   emailAddress: "",
+  phoneNumber: "",
   assignedRole: "OPERATIONS_CLERK",
 };
 
@@ -135,9 +139,17 @@ export default function UserManagementPage() {
       !form.firstName ||
       !form.lastName ||
       !form.userName ||
-      !form.emailAddress
+      !form.emailAddress ||
+      !form.phoneNumber
     ) {
       setNotice("All fields are required.");
+      return;
+    }
+    const contactProblem = contactNumberError(form.phoneNumber, {
+      required: true,
+    });
+    if (contactProblem) {
+      setError(contactProblem);
       return;
     }
     setSaving(true);
@@ -148,6 +160,7 @@ export default function UserManagementPage() {
         lastName: form.lastName.trim(),
         userName: form.userName.trim(),
         emailAddress: form.emailAddress.trim(),
+        phoneNumber: normalizeContactNumber(form.phoneNumber),
         assignedRole: form.assignedRole,
         accountStatus: "active",
       });
@@ -362,6 +375,11 @@ export default function UserManagementPage() {
               onChange={(e) => setField("emailAddress", e.target.value)}
               fullWidth
               helperText="Used as the Cognito sign-in name."
+            />
+            <ContactNumberField
+              value={form.phoneNumber}
+              onChange={(next) => setField("phoneNumber", next)}
+              required
             />
             <Box>
               <InputLabel id="role-select-label">Assigned Role</InputLabel>

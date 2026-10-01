@@ -469,6 +469,9 @@ function DocumentRequestsPageContent() {
                   <TableRow>
                     <TableCell sx={{ fontWeight: 700 }}>Request ID</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Applicant</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>
+                      Contact Number
+                    </TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Document Type</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Purpose</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
@@ -515,6 +518,11 @@ function DocumentRequestsPageContent() {
                             {doc.applicantDetails?.emailAddress ?? ""}
                           </Typography>
                         </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" noWrap sx={{ maxWidth: 160 }}>
+                          {doc.applicantDetails?.contactNumber || "—"}
+                        </Typography>
                       </TableCell>
                       <TableCell>{doc.documentType}</TableCell>
                       <TableCell>

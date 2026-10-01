@@ -51,9 +51,10 @@ export async function createDocumentRequest(
     );
   }
 
-  // The contact number is optional here (it falls back to the resident's stored
-  // value), but a supplied one must still be digits only and within the cap.
-  const contactProblem = contactNumberViolation(body.contactNumber);
+  // The contact number is required: responders need a number to call, so a
+  // request cannot be filed without one. Legacy `+63…`/spaced values are
+  // normalized and accepted.
+  const contactProblem = contactNumberViolation(body.contactNumber, { required: true });
   if (contactProblem) {
     return badRequest(contactProblem);
   }
@@ -84,13 +85,9 @@ export async function createDocumentRequest(
       fullName: [resident.firstName, resident.middleName, resident.lastName, resident.suffix]
         .filter(Boolean)
         .join(' '),
-      // Prefer the contact details captured on the request form; fall back to
-      // the resident's stored values (or empty strings when unknown) instead
-      // of failing the schema's required check. Both paths are normalized so
-      // the snapshot is digits-only even for older `+63…` records.
-      contactNumber:
-        normalizeContactNumber(body.contactNumber ?? '') ||
-        normalizeContactNumber(resident.contactNumber ?? ''),
+      // Required on the form, so this is always the number the applicant
+      // provided (normalized to digits-only, accepting legacy `+63…` input).
+      contactNumber: normalizeContactNumber(body.contactNumber ?? ''),
       emailAddress:
         body.emailAddress?.trim().toLowerCase() || resident.emailAddress || '',
     },
