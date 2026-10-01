@@ -4,6 +4,7 @@ import { withErrorHandling, parseBody } from '../../../shared/handler';
 import { created, badRequest } from '../../../shared/responses';
 import { badRequestError } from '../../../shared/errors';
 import { parseCoordinates } from '../../../shared/coordinates';
+import { contactNumberViolation, normalizeContactNumber } from '../../../shared/contact-number';
 import { assertPurokInBarangay, resolveBarangayPuroks } from '../../../shared/puroks';
 import { IncidentReport, Resident } from '../../../models';
 import {
@@ -28,6 +29,12 @@ interface CreateIncidentBody {
     | 'Public Disturbance'
     | 'Other';
   descriptionText?: string;
+  /**
+   * Contact number the reporter can be reached at. Optional — the handler falls
+   * back to the reporting resident's stored number, exactly like the document
+   * request form.
+   */
+  contactNumber?: string;
   /**
    * The purok the incident is in. Must name one of the reporting resident's
    * barangay's puroks; the handler stores the barangay's own spelling.
@@ -130,6 +137,14 @@ export async function createIncidentReport(
     );
   }
 
+  // Optional, but a supplied number must still be digits only and within the
+  // cap — the same rule the document request form enforces, so the two cannot
+  // drift apart.
+  const contactProblem = contactNumberViolation(body.contactNumber);
+  if (contactProblem) {
+    return badRequest(contactProblem);
+  }
+
   // Defense-in-depth: residents can only file reports for themselves.
   assertOwnResidentRef(auth, effectiveResidentId);
 
@@ -178,6 +193,13 @@ export async function createIncidentReport(
     // longer sets — see the model.
     purok,
     landmark,
+    // Snapshot for responders. Falls back to the resident's stored number so a
+    // report is still callable when the field was left blank, and the fallback
+    // is normalized too so legacy `+63…` profile values converge on digits.
+    contactNumber:
+      normalizeContactNumber(body.contactNumber ?? '') ||
+      normalizeContactNumber(resident.contactNumber ?? '') ||
+      undefined,
     latitude: coordinates?.latitude,
     longitude: coordinates?.longitude,
     // System-driven triage: priority is computed by rules, not chosen by a human.

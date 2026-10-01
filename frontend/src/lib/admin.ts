@@ -226,6 +226,11 @@ export interface IncidentRecord extends ArchiveMetadata {
   purok?: string | null;
   landmark?: string | null;
   /**
+   * Contact number captured with the report (digits only). Absent on reports
+   * filed before the field existed and when the reporter's profile had none.
+   */
+  contactNumber?: string | null;
+  /**
    * Pinned location from the incident map picker (WGS84 decimal degrees).
    * Absent on reports filed before the picker existed, and on any record created
    * before the backend stored coordinates.

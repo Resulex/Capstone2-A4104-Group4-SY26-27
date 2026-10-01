@@ -21,6 +21,7 @@ import { StatusChip } from "@/components/resident/StatusChip";
 import { EmptyState } from "@/components/resident/EmptyState";
 import { LoadingSkeleton } from "@/components/resident/LoadingSkeleton";
 import { TimelineSteps } from "@/components/shared/TimelineSteps";
+import { useResident } from "@/context/ResidentContext";
 import { useBarangay } from "@/hooks/useBarangay";
 import { IncidentRecord, formatIncidentLocation } from "@/lib/admin";
 import { coordinatesFrom } from "@/lib/geo";
@@ -129,7 +130,8 @@ function LocationPlaceholder({ label }: { label: string }) {
  *
  * Fetches a single report (matched by custom `incidentId` or `_id`) and shows
  * the pinned map location, the category, the automated triage priority, status,
- * the reported timestamp and any evidence media links.
+ * the reported timestamp, the reporter's contact number and any evidence media
+ * links.
  */
 export default function IncidentDetailsPage() {
   const params = useParams<{ id: string }>();
@@ -152,6 +154,9 @@ export default function IncidentDetailsPage() {
 
   // Frames the read-only map to the resident's own barangay.
   const { area: mapArea } = useBarangay();
+  // Reports filed before the contact field existed carry no number; the
+  // resident's own profile is the sensible stand-in, as on the document page.
+  const { profile } = useResident();
   const pin = coordinatesFrom(report);
   // Structured location for new reports, legacy free text for older ones.
   const locationLabel = report ? formatIncidentLocation(report) : "";
@@ -246,6 +251,16 @@ export default function IncidentDetailsPage() {
                 <DetailRow
                   label="Reported At"
                   value={formatDateTime(report.reportedAt)}
+                />
+                <DetailRow
+                  label="Contact Number"
+                  value={
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {report.contactNumber ??
+                        profile?.contactNumber ??
+                        "Not provided"}
+                    </Typography>
+                  }
                 />
                 <DetailRow
                   label="Location Details"

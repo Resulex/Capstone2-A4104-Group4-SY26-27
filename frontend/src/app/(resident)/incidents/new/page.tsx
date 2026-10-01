@@ -17,9 +17,12 @@ import Snackbar from "@mui/material/Snackbar";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import { PageHeader } from "@/components/resident/PageHeader";
 import { MediaUploader } from "@/components/shared/MediaUploader";
+import { ContactNumberField } from "@/components/shared/ContactNumberField";
+import { useResident } from "@/context/ResidentContext";
 import { useResidentDashboard } from "@/context/ResidentDashboardContext";
 import { useBarangay } from "@/hooks/useBarangay";
 import type { Coordinates } from "@/lib/geo";
+import { contactNumberError, normalizeContactNumber } from "@/lib/phone";
 import {
   INCIDENT_CATEGORIES,
   createIncidentReport,
@@ -41,9 +44,10 @@ const LocationPicker = dynamic(
 /**
  * New Incident Report (`/incidents/new`).
  *
- * Collects the incident category, description and location, then submits via
- * `POST /incident-reports` and routes to the new report's detail page. The
- * backend's rule-based triage engine assigns the priority on submission.
+ * Collects the incident category, description, a contact number and the
+ * location, then submits via `POST /incident-reports` and routes to the new
+ * report's detail page. The backend's rule-based triage engine assigns the
+ * priority on submission.
  *
  * The location is captured two ways. The `purok` is a required selection from
  * the resident's own barangay vocabulary, and is what the backend validates — so
@@ -56,15 +60,25 @@ const LocationPicker = dynamic(
 
 /** Field-level problems, keyed by the input they belong to. */
 type FieldErrors = Partial<
-  Record<"incidentCategory" | "descriptionText" | "purok", string>
+  Record<
+    "incidentCategory" | "descriptionText" | "purok" | "contactNumber",
+    string
+  >
 >;
 
 export default function NewIncidentReportPage() {
   const router = useRouter();
+  const { profile } = useResident();
   const { reload, addIncidentReportLocal } = useResidentDashboard();
 
   const [incidentCategory, setIncidentCategory] = useState("");
   const [descriptionText, setDescriptionText] = useState("");
+  // Older profiles store the `+63…` country-code form, which the digits-only
+  // field would reject — normalize it into the local `09…` form up front, the
+  // same way the document request form does.
+  const [contactNumber, setContactNumber] = useState(() =>
+    normalizeContactNumber(profile?.contactNumber ?? ""),
+  );
   const [purok, setPurok] = useState("");
   const [landmark, setLandmark] = useState("");
   const [locationPin, setLocationPin] = useState<Coordinates | null>(null);
@@ -110,6 +124,12 @@ export default function NewIncidentReportPage() {
     if (!purok) {
       next.purok = "Choose the purok where this happened.";
     }
+    // Optional, so a blank value is fine; this only catches a malformed one at
+    // the submit boundary (the shared field already sanitizes as you type).
+    const contactProblem = contactNumberError(contactNumber);
+    if (contactProblem) {
+      next.contactNumber = contactProblem;
+    }
     return next;
   };
 
@@ -128,6 +148,9 @@ export default function NewIncidentReportPage() {
         descriptionText,
         purok,
         landmark: landmark.trim() || undefined,
+        // Blank means "use the number on my profile" — the backend fills the
+        // gap from the resident record.
+        contactNumber: normalizeContactNumber(contactNumber) || undefined,
         latitude: locationPin?.latitude,
         longitude: locationPin?.longitude,
         evidenceMediaUrls,
@@ -214,6 +237,22 @@ export default function NewIncidentReportPage() {
                 inputProps={{ "aria-label": "Incident description" }}
                 placeholder="Describe what happened…"
                 helperText={fieldErrors.descriptionText}
+              />
+
+              {/* Carried on the report so responders can call the reporter
+                  without leaving the record. Optional: leaving it blank keeps
+                  the number already on the resident's profile. */}
+              <ContactNumberField
+                value={contactNumber}
+                onChange={(next) => {
+                  setContactNumber(next);
+                  clearFieldError("contactNumber");
+                }}
+                error={!!fieldErrors.contactNumber}
+                helperText={
+                  fieldErrors.contactNumber ??
+                  "Optional. Digits only, up to 11 digits — if left blank we will use the number on your profile."
+                }
               />
 
               {/* Pin the exact spot. The map is clamped to the barangay, and
