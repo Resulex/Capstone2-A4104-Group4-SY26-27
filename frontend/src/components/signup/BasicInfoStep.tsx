@@ -64,11 +64,10 @@ export function BasicInfoStep({ onSubmit }: BasicInfoStepProps) {
     else if (!EMAIL_RE.test(values.email.trim()))
       next.email = "Enter a valid email address.";
 
-    // Sign-up is the one place that requires a mobile number: it doubles as a
-    // login identifier, so a landline is not accepted here.
+    // The number doubles as a login identifier, so a valid PH mobile
+    // (09xxxxxxxxx) is required here.
     const contactProblem = contactNumberError(values.contactNumber, {
       required: true,
-      mobileOnly: true,
     });
     if (contactProblem) next.contactNumber = contactProblem;
 

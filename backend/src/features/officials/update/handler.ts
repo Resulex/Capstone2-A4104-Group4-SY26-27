@@ -51,7 +51,7 @@ export async function updateOfficial(
   if (body.fullName !== undefined) official.fullName = body.fullName;
   if (body.designatedPosition !== undefined) official.designatedPosition = body.designatedPosition;
   if (body.contactNumber !== undefined) {
-    const contactProblem = contactNumberViolation(body.contactNumber);
+    const contactProblem = contactNumberViolation(body.contactNumber, { required: true });
     if (contactProblem) {
       throw badRequestError(contactProblem);
     }

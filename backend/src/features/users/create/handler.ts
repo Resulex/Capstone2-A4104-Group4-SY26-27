@@ -6,6 +6,10 @@ import { conflictError, badRequestError, forbiddenError } from '../../../shared/
 import { hashPassword } from '../../../shared/password';
 import { User, Barangay } from '../../../models';
 import { getAuthContext, requireStaffOrAdmin } from '../../../shared/authorization';
+import {
+  contactNumberViolation,
+  normalizeContactNumber,
+} from '../../../shared/contact-number';
 
 interface CreateUserBody {
   firstName?: string;
@@ -32,12 +36,17 @@ export async function createUser(
   requireStaffOrAdmin(auth);
 
   const body = parseBody(event) as CreateUserBody;
-  const { firstName, lastName, email, password, role, barangayId } = body;
+  const { firstName, lastName, email, phone, password, role, barangayId } = body;
 
-  if (!firstName || !lastName || !email || !password || !role || !barangayId) {
+  if (!firstName || !lastName || !email || !phone || !password || !role || !barangayId) {
     return badRequest(
-      'firstName, lastName, email, password, role, and barangayId are required.'
+      'firstName, lastName, email, phone, password, role, and barangayId are required.'
     );
+  }
+
+  const contactProblem = contactNumberViolation(phone, { required: true });
+  if (contactProblem) {
+    return badRequest(contactProblem);
   }
 
   // Only admins may create admin-role users.
@@ -63,7 +72,7 @@ export async function createUser(
     firstName,
     lastName,
     email: email.toLowerCase(),
-    phone: body.phone || undefined,
+    phone: normalizeContactNumber(phone ?? ''),
     passwordHash,
     role,
     barangay: barangay._id,

@@ -2,11 +2,15 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-l
 import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody, parsePathParam, buildIdOrCustomIdQuery } from '../../../shared/handler';
 import { ok, badRequest } from '../../../shared/responses';
-import { notFoundError, forbiddenError } from '../../../shared/errors';
+import { notFoundError, forbiddenError, badRequestError } from '../../../shared/errors';
 import { hashPassword } from '../../../shared/password';
 import { Admin } from '../../../models';
 import { resolveAuthContext, requireAssignedRole } from '../../../shared/authorization';
 import { getCognitoGateway, cognitoReady } from '../../../shared/cognito';
+import {
+  contactNumberViolation,
+  normalizeContactNumber,
+} from '../../../shared/contact-number';
 
 interface UpdateAdminBody {
   firstName?: string;
@@ -99,7 +103,13 @@ export async function updateAdmin(
   if (body.middleName !== undefined) admin.middleName = body.middleName;
   if (body.userName !== undefined) admin.userName = body.userName;
   if (body.emailAddress !== undefined) admin.emailAddress = body.emailAddress.toLowerCase();
-  if (body.phoneNumber !== undefined) admin.phoneNumber = body.phoneNumber.trim();
+  if (body.phoneNumber !== undefined) {
+    const contactProblem = contactNumberViolation(body.phoneNumber, { required: true });
+    if (contactProblem) {
+      throw badRequestError(contactProblem);
+    }
+    admin.phoneNumber = normalizeContactNumber(body.phoneNumber);
+  }
   if (body.assignedRole !== undefined) admin.assignedRole = body.assignedRole;
   if (body.accountStatus !== undefined) admin.accountStatus = body.accountStatus;
   if (body.statusReason !== undefined) admin.statusReason = body.statusReason;

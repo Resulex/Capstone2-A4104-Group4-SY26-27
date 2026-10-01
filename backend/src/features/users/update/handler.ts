@@ -2,10 +2,14 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-l
 import { connectToDatabase } from '../../../config/db';
 import { withErrorHandling, parseBody, parsePathParam } from '../../../shared/handler';
 import { ok } from '../../../shared/responses';
-import { notFoundError, forbiddenError } from '../../../shared/errors';
+import { notFoundError, forbiddenError, badRequestError } from '../../../shared/errors';
 import { hashPassword } from '../../../shared/password';
 import { User } from '../../../models';
 import { getAuthContext } from '../../../shared/authorization';
+import {
+  contactNumberViolation,
+  normalizeContactNumber,
+} from '../../../shared/contact-number';
 
 interface UpdateUserBody {
   firstName?: string;
@@ -53,7 +57,13 @@ export async function updateUser(
 
   if (body.firstName !== undefined) user.firstName = body.firstName;
   if (body.lastName !== undefined) user.lastName = body.lastName;
-  if (body.phone !== undefined) user.phone = body.phone;
+  if (body.phone !== undefined) {
+    const contactProblem = contactNumberViolation(body.phone, { required: true });
+    if (contactProblem) {
+      throw badRequestError(contactProblem);
+    }
+    user.phone = normalizeContactNumber(body.phone);
+  }
   if (body.isActive !== undefined && auth.role !== 'resident') {
     user.isActive = body.isActive;
   }

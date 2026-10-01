@@ -68,7 +68,7 @@ export async function updateResident(
   if (body.middleName !== undefined) resident.middleName = body.middleName;
   if (body.suffix !== undefined) resident.suffix = body.suffix;
   if (body.contactNumber !== undefined) {
-    const contactProblem = contactNumberViolation(body.contactNumber);
+    const contactProblem = contactNumberViolation(body.contactNumber, { required: true });
     if (contactProblem) {
       throw badRequestError(contactProblem);
     }

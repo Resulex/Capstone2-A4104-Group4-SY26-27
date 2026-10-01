@@ -70,10 +70,10 @@ export async function register(
     );
   }
 
-  // Optional here, but when supplied it must be a PH mobile number: it doubles
-  // as a login identifier, so a landline is not accepted on this route.
+  // Required: the number doubles as a login and recovery identifier, so a
+  // valid PH mobile (09xxxxxxxxx) must be supplied.
   const contactProblem = contactNumberViolation(contactNumber, {
-    mobileOnly: true,
+    required: true,
   });
   if (contactProblem) {
     return badRequest(contactProblem);

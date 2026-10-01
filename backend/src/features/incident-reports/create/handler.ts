@@ -137,10 +137,10 @@ export async function createIncidentReport(
     );
   }
 
-  // Optional, but a supplied number must still be digits only and within the
-  // cap — the same rule the document request form enforces, so the two cannot
-  // drift apart.
-  const contactProblem = contactNumberViolation(body.contactNumber);
+  // Required: responders need a number to call — the same rule the document
+  // request form enforces, so the two cannot drift apart. Legacy `+63…` and
+  // spaced values are normalized and accepted.
+  const contactProblem = contactNumberViolation(body.contactNumber, { required: true });
   if (contactProblem) {
     return badRequest(contactProblem);
   }
@@ -193,13 +193,10 @@ export async function createIncidentReport(
     // longer sets — see the model.
     purok,
     landmark,
-    // Snapshot for responders. Falls back to the resident's stored number so a
-    // report is still callable when the field was left blank, and the fallback
-    // is normalized too so legacy `+63…` profile values converge on digits.
-    contactNumber:
-      normalizeContactNumber(body.contactNumber ?? '') ||
-      normalizeContactNumber(resident.contactNumber ?? '') ||
-      undefined,
+    // Snapshot for responders. Required on the form, so this is always the
+    // number the reporter provided (normalized to digits-only, accepting
+    // legacy `+63…` input).
+    contactNumber: normalizeContactNumber(body.contactNumber ?? ''),
     latitude: coordinates?.latitude,
     longitude: coordinates?.longitude,
     // System-driven triage: priority is computed by rules, not chosen by a human.
