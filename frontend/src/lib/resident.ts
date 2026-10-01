@@ -338,6 +338,27 @@ export async function fetchBarangay(
   }
 }
 
+/**
+ * Fetch the barangay list (authenticated — any signed-in user may read it).
+ *
+ * Preferred over `fetchBarangay` when the caller needs `puroks`: the list
+ * handler reads raw documents on the backend, so a field the server's compiled
+ * schema does not know about is still returned, whereas `GET /barangays/{id}`
+ * hydrates a document and silently drops it. It is also the only usable source
+ * when the stored profile carries no `barangay` reference — that profile is
+ * written by the Google-SSO callback, so a resident who signed up with a
+ * password never receives one.
+ *
+ * Never throws — resolves to an empty list so the caller can degrade.
+ */
+export async function fetchBarangays(): Promise<BarangayRecord[]> {
+  try {
+    return await getApi<BarangayRecord[]>("barangays");
+  } catch {
+    return [];
+  }
+}
+
 /** Fetch a single announcement by custom `announcementId` or `_id`. */
 export async function fetchAnnouncement(
   id: string,
