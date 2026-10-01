@@ -6,16 +6,29 @@ import {
   resolveBarangayArea,
   type BarangayArea,
 } from "@/lib/geo";
-import { fetchBarangay, loadResidentProfile } from "@/lib/resident";
+import {
+  fetchBarangay,
+  fetchBarangays,
+  loadResidentProfile,
+  type BarangayRecord,
+} from "@/lib/resident";
 
 /**
  * The resident's own barangay: the map extent plus the purok vocabulary.
  *
- * Resolved from the resident's barangay record so both the bounds and the purok
- * list stay data-driven rather than baked into the pages. Returns the fallbacks
- * (`BARANGAY_AREA`, no puroks) until the lookup settles, and keeps returning them
- * permanently when the profile or the barangay record is unavailable — so the
- * map is always usable and never waits on the network to render.
+ * `puroks` is read from the barangay LIST rather than `GET /barangays/{id}`.
+ * Two reasons:
+ *
+ *  - The list handler reads raw documents on the backend, so `puroks` comes back
+ *    even when the server's compiled schema predates the field, whereas the
+ *    single-record route hydrates a document and silently drops it.
+ *  - The stored profile is written by the Google-SSO callback, so a resident who
+ *    signed up with a password may carry no `barangay` reference at all — that
+ *    alone must not leave the vocabulary empty.
+ *
+ * Returns the fallbacks (`BARANGAY_AREA`, no puroks) until the lookup settles,
+ * and keeps returning them when the lookup fails, so the map is always usable
+ * and never waits on the network to render.
  */
 export interface BarangayContext {
   /** Extent the incident map is framed to and clamped by. */
@@ -37,6 +50,30 @@ export interface BarangayContext {
   loading: boolean;
 }
 
+/**
+ * Picks the barangay record the map extent and purok list come from.
+ *
+ * Never throws: resolves to null, and the caller degrades to the fallbacks.
+ */
+async function resolveBarangay(): Promise<BarangayRecord | null> {
+  const profileBarangayId = loadResidentProfile()?.barangay;
+  const list = await fetchBarangays();
+
+  const match = profileBarangayId
+    ? list.find((barangay) => barangay._id === profileBarangayId)
+    : undefined;
+  if (match) return match;
+
+  // No match: either the profile carries no usable reference (password sign-ups
+  // never receive one) or the list is the only source. Prefer the resident's own
+  // record when its id is known, otherwise take the single barangay served here.
+  if (profileBarangayId) {
+    const own = await fetchBarangay(profileBarangayId);
+    if (own) return own;
+  }
+  return list[0] ?? null;
+}
+
 export function useBarangay(): BarangayContext {
   const [context, setContext] = useState<BarangayContext>({
     area: BARANGAY_AREA,
@@ -45,17 +82,9 @@ export function useBarangay(): BarangayContext {
   });
 
   useEffect(() => {
-    const barangayId = loadResidentProfile()?.barangay;
-    if (!barangayId) {
-      // Nothing to fetch: settle immediately so a caller never waits forever.
-      setContext((prev) => ({ ...prev, loading: false }));
-      return;
-    }
-
     let cancelled = false;
     void (async () => {
-      // Never throws: resolves to null on any failure.
-      const barangay = await fetchBarangay(barangayId);
+      const barangay = await resolveBarangay();
       if (cancelled) return;
 
       setContext({
