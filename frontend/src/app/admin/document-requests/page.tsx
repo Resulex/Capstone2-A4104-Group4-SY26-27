@@ -30,7 +30,9 @@ import Typography from "@mui/material/Typography";
 import { alpha } from "@mui/material/styles";
 import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
+import Avatar from "@mui/material/Avatar";
 import DescriptionIcon from "@mui/icons-material/Description";
+import ImageIcon from "@mui/icons-material/Image";
 import ArchiveIcon from "@mui/icons-material/Archive";
 import UnarchiveIcon from "@mui/icons-material/Unarchive";
 import HistoryIcon from "@mui/icons-material/History";
@@ -42,6 +44,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useCanArchive } from "@/hooks/useCanArchive";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { TimelineSteps } from "@/components/shared/TimelineSteps";
+import { MediaPreviewDialog } from "@/components/shared/MediaPreviewDialog";
 import { ArchiveConfirmDialog } from "@/components/admin/ArchiveConfirmDialog";
 import { ArchiveScopeToggle } from "@/components/admin/ArchiveScopeToggle";
 import {
@@ -56,6 +59,7 @@ import {
   restoreRecord,
   updateDocumentRequest,
 } from "@/lib/admin";
+import { isImageUrl, fileNameOf } from "@/lib/uploads";
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -139,6 +143,8 @@ function DocumentRequestsPageContent() {
   const [historyDoc, setHistoryDoc] = useState<DocumentQueueRecord | null>(
     null,
   );
+  /** Verification ID being previewed in the media lightbox. */
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthLoading && (!isAuthenticated || user?.role !== "admin")) {
@@ -474,6 +480,7 @@ function DocumentRequestsPageContent() {
                     </TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Document Type</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Purpose</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Media</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Requested</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Remarks</TableCell>
@@ -529,6 +536,47 @@ function DocumentRequestsPageContent() {
                         <Typography variant="body2" noWrap sx={{ maxWidth: 220 }}>
                           {doc.purpose || "—"}
                         </Typography>
+                      </TableCell>
+                      <TableCell>
+                        {doc.verificationIdUrl ? (
+                          <Tooltip title={fileNameOf(doc.verificationIdUrl)}>
+                            <IconButton
+                              size="small"
+                              aria-label={`Preview verification ID for ${doc.requestId}`}
+                              onClick={() => setPreviewUrl(doc.verificationIdUrl!)}
+                            >
+                              {isImageUrl(doc.verificationIdUrl) ? (
+                                <Avatar
+                                  variant="rounded"
+                                  src={doc.verificationIdUrl}
+                                  alt={fileNameOf(doc.verificationIdUrl)}
+                                  sx={{ width: 48, height: 48 }}
+                                >
+                                  <ImageIcon />
+                                </Avatar>
+                              ) : (
+                                <Box
+                                  sx={{
+                                    width: 48,
+                                    height: 48,
+                                    borderRadius: 1,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    bgcolor: "action.hover",
+                                    color: "text.secondary",
+                                  }}
+                                >
+                                  <ImageIcon />
+                                </Box>
+                              )}
+                            </IconButton>
+                          </Tooltip>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">
+                            —
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell>
                         <FormControl fullWidth size="small">
@@ -723,6 +771,13 @@ function DocumentRequestsPageContent() {
         busy={pendingId !== null}
         onConfirm={handleArchiveAction}
         onCancel={() => setPendingArchive(null)}
+      />
+
+      {/* Verification ID lightbox — opens with the single submitted ID. */}
+      <MediaPreviewDialog
+        open={Boolean(previewUrl)}
+        urls={previewUrl ? [previewUrl] : []}
+        onClose={() => setPreviewUrl(null)}
       />
 
       <Snackbar

@@ -118,7 +118,10 @@ export async function createIncidentReport(
   const auth = getAuthContext(event);
   const body = parseBody(event) as CreateIncidentBody;
 
-  const { incidentCategory, descriptionText } = body;
+  const { incidentCategory } = body;
+  // The note is optional — an empty string is a valid report. Triage falls back
+  // to category-only matching when there is nothing to read.
+  const descriptionText = (body.descriptionText ?? '').trim();
   // Throws a 400 for a half-filled or out-of-range pin; returns `undefined`
   // when the resident only typed an address (records predating the picker).
   const coordinates = parseCoordinates(body.latitude, body.longitude);
@@ -131,16 +134,16 @@ export async function createIncidentReport(
   const effectiveResidentId =
     body.residentId || (auth.role === 'admin' ? undefined : auth.userId);
 
-  if (!effectiveResidentId || !incidentCategory || !descriptionText || !body.purok) {
-    return badRequest(
-      'residentId, incidentCategory, descriptionText, and purok are required.'
-    );
+  // Only the category is required: a panicking resident must be able to file
+  // with nothing else filled in. Everything else is optional or derived.
+  if (!effectiveResidentId || !incidentCategory) {
+    return badRequest('residentId and incidentCategory are required.');
   }
 
-  // Required: responders need a number to call — the same rule the document
-  // request form enforces, so the two cannot drift apart. Legacy `+63…` and
-  // spaced values are normalized and accepted.
-  const contactProblem = contactNumberViolation(body.contactNumber, { required: true });
+  // A number is optional now: the form no longer asks for one. When present it
+  // is still format-checked; when absent the handler snapshots the resident's
+  // stored number below.
+  const contactProblem = contactNumberViolation(body.contactNumber);
   if (contactProblem) {
     return badRequest(contactProblem);
   }
@@ -170,11 +173,14 @@ export async function createIncidentReport(
     throw badRequestError('Invalid residentId.');
   }
 
-  // The purok is checked against the RESIDENT's barangay, never the caller's, so
-  // an admin filing on someone's behalf is validated against the right
-  // vocabulary. Throws a 400 naming the valid puroks.
-  const puroks = await resolveBarangayPuroks(resident.barangay);
-  const purok = assertPurokInBarangay(body.purok, puroks);
+  // Purok is optional on the write path now: the resident form no longer sends
+  // one. A provided value (an admin filing on someone's behalf, or an older
+  // client) is still checked against the RESIDENT's barangay — never the
+  // caller's — and persisted in the barangay's own spelling.
+  const purok =
+    body.purok !== undefined
+      ? assertPurokInBarangay(body.purok, await resolveBarangayPuroks(resident.barangay))
+      : undefined;
   const landmark = body.landmark?.trim() || undefined;
 
   const incidentId = await nextIncidentId();
@@ -193,10 +199,10 @@ export async function createIncidentReport(
     // longer sets — see the model.
     purok,
     landmark,
-    // Snapshot for responders. Required on the form, so this is always the
-    // number the reporter provided (normalized to digits-only, accepting
-    // legacy `+63…` input).
-    contactNumber: normalizeContactNumber(body.contactNumber ?? ''),
+    // Snapshot for responders. Optional on the form, so fall back to the
+    // resident's stored number when none was typed (normalized to digits-only,
+    // accepting legacy `+63…` input).
+    contactNumber: normalizeContactNumber(body.contactNumber ?? resident.contactNumber ?? ''),
     latitude: coordinates?.latitude,
     longitude: coordinates?.longitude,
     // System-driven triage: priority is computed by rules, not chosen by a human.
@@ -220,7 +226,9 @@ export async function createIncidentReport(
   await notifyAllActiveAdmins({
     category: 'incidentAlert',
     titleText: 'New Incident Report',
-    messageBody: `${name} created an incident report: ${incidentCategory}: ${descriptionText}`,
+    messageBody: `${name} created an incident report: ${incidentCategory}${
+      descriptionText ? `: ${descriptionText}` : ''
+    }`,
     referenceUrlId: incidentId,
   });
 

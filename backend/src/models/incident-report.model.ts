@@ -147,7 +147,7 @@ const incidentReportSchema = new Schema<IIncidentReport>(
       ],
       required: true,
     },
-    descriptionText: { type: String, required: true },
+    descriptionText: { type: String, default: '' },
     // Optional reporter contact snapshot. Deliberately not `required`: legacy
     // records have no value, and the create handler is what validates and
     // normalizes whatever the client supplies.

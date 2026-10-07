@@ -60,6 +60,14 @@ provider:
     # Media uploads (S3 presigned URLs — see src/shared/s3.ts)
     S3_BUCKET_NAME: ${env:S3_BUCKET_NAME, 'kabarangayconnect-media'}
     S3_BUCKET_REGION: ${env:S3_BUCKET_REGION, 'ap-southeast-1'}
+    # Resident AI assistant (portal-wide Q&A). Leave the keys empty to run the
+    # built-in keyword fallback; set them to route replies to a hosted model.
+    CHATBOT_PROVIDER: ${env:CHATBOT_PROVIDER, 'deepseek'}
+    DEEPSEEK_API_KEY: ${env:DEEPSEEK_API_KEY, ''}
+    DEEPSEEK_BASE_URL: ${env:DEEPSEEK_BASE_URL, 'https://api.deepseek.com'}
+    DEEPSEEK_MODEL: ${env:DEEPSEEK_MODEL, 'deepseek-chat'}
+    HUGGINGFACE_API_KEY: ${env:HUGGINGFACE_API_KEY, ''}
+    HUGGINGFACE_MODEL: ${env:HUGGINGFACE_MODEL, ''}
     # Management-API endpoint the notification broadcast targets
     # (see src/shared/ws.ts). `broadcastToAdmin` is a safe no-op while this is
     # empty, so the HTTP feature set keeps working without a WebSocket API.
@@ -1115,6 +1123,27 @@ functions:
             identitySource: method.request.header.Authorization
 
   # ---------------------------------------------------------------------------
+  # Geocoding — Reverse
+  # Use-case: derive the human-readable address for an incident map pin so the
+  # resident form can auto-fill a Location field. Proxies OSM Nominatim with an
+  # identifying User-Agent and ~1 req/s spacing.
+  # Handler: src/features/geocoding/reverse/handler.ts
+  # API:     GET /geocoding/reverse?latitude=…&longitude=…  (authenticated)
+  # ---------------------------------------------------------------------------
+  geocoding-reverse:
+    handler: src/features/geocoding/reverse/handler.handler
+    events:
+      - http:
+          path: geocoding/reverse
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  # ---------------------------------------------------------------------------
   # Media Uploads — Presign
   # Use-case: mint a short-lived S3 presigned PUT URL so residents/admins can
   # upload evidence, verification IDs, banners and profile photos directly to
@@ -1375,6 +1404,44 @@ functions:
       - http:
           path: notifications/read-all
           method: patch
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  # Resident AI assistant — caller-scoped conversation store + Q&A. The
+  # handlers live in `chatbot/{get,send,clear}/` and MUST be registered here.
+  chatbot-get:
+    handler: src/features/chatbot/get/handler.handler
+    events:
+      - http:
+          path: chatbot/conversation
+          method: get
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  chatbot-send:
+    handler: src/features/chatbot/send/handler.handler
+    events:
+      - http:
+          path: chatbot/messages
+          method: post
+          cors: true
+          authorizer:
+            name: auth-jwt
+            type: REQUEST
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+  chatbot-clear:
+    handler: src/features/chatbot/clear/handler.handler
+    events:
+      - http:
+          path: chatbot/conversation
+          method: delete
           cors: true
           authorizer:
             name: auth-jwt
