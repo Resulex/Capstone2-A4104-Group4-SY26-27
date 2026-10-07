@@ -236,18 +236,17 @@ export async function fetchAccountDeletionState(): Promise<AccountDeletionState>
 
 /**
  * Submit a new incident report. Self-reporting only — the backend derives the
- * resident owner from the JWT, so no `residentId` is required.
+ * resident owner from the JWT, so no `residentId` is required. Only the
+ * category is required; everything else is optional.
  */
 export async function createIncidentReport(body: {
   incidentCategory: string;
-  descriptionText: string;
+  /** Optional free-text note/context. Empty is fine. */
+  descriptionText?: string;
   /**
-   * The purok the incident is in. Required, and validated by the backend against
-   * the reporting resident's barangay — so it must come from that barangay's
-   * `puroks` list rather than being typed freely.
+   * Free-text location (the map pin's reverse-geocoded address, editable).
+   * Optional — the backend accepts a report with no written location.
    */
-  purok: string;
-  /** Free-text landmark/house note supplementing `purok`. Optional. */
   landmark?: string;
   /**
    * Contact number to reach the reporter at. Optional — when omitted the
@@ -256,7 +255,7 @@ export async function createIncidentReport(body: {
   contactNumber?: string;
   /**
    * Pin from the incident map picker. Optional — the map may be unavailable, so
-   * a resident can still file a report with only the written address.
+   * a resident can still file a report with only the written location.
    */
   latitude?: number;
   longitude?: number;
@@ -361,6 +360,27 @@ export async function fetchBarangays(): Promise<BarangayRecord[]> {
     return await getApi<BarangayRecord[]>("barangays");
   } catch {
     return [];
+  }
+}
+
+/**
+ * Reverse-geocode a map pin into a human-readable address via the backend proxy
+ * (public OSM Nominatim behind `GET /geocoding/reverse`).
+ *
+ * Best-effort: never throws — resolves to `null` when the lookup fails, so the
+ * form can fall back to a blank Location field the resident fills in themselves.
+ */
+export async function reverseGeocode(
+  latitude: number,
+  longitude: number,
+): Promise<string | null> {
+  try {
+    const data = await getApi<{ displayName: string | null }>(
+      `geocoding/reverse?latitude=${latitude}&longitude=${longitude}`,
+    );
+    return data?.displayName ?? null;
+  } catch {
+    return null;
   }
 }
 

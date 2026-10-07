@@ -25,3 +25,9 @@ export {
   ResidentConnection,
   type IResidentConnection,
 } from './resident-connection.model';
+export {
+  ChatbotConversation,
+  type IChatbotConversation,
+  type IChatbotMessage,
+  type ChatbotMessageRole,
+} from './chatbot-conversation.model';

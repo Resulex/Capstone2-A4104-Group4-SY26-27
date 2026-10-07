@@ -14,6 +14,7 @@ import { SessionTimeoutDialog } from "@/components/shared/SessionTimeoutDialog";
 import { ResidentSidebar } from "@/components/resident/ResidentSidebar";
 import { ResidentHeader } from "@/components/resident/ResidentHeader";
 import { ResidentFooter } from "@/components/resident/ResidentFooter";
+import { ResidentChatbot } from "@/components/resident/ResidentChatbot";
 import { useAuth } from "@/context/AuthContext";
 import { useResident } from "@/context/ResidentContext";
 import {
@@ -379,6 +380,9 @@ function ResidentShell({ children }: { children: React.ReactNode }) {
         onOpen={toast ? () => handleOpenNotification(toast) : undefined}
         maxWidth={420}
       />
+
+      {/* Resident AI assistant — portal-wide Q&A (informational only). */}
+      <ResidentChatbot />
     </Box>
   );
 }

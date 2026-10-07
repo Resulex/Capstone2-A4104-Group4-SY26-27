@@ -41,6 +41,11 @@ export interface LocationPickerProps {
   height?: number;
   /** Hint shown beneath the map while no pin has been placed. */
   helperText?: string;
+  /**
+   * Auto-pin to the resident's current location on first load. The "Use my
+   * current location" button is kept either way; this only skips the first tap.
+   */
+  autoLocate?: boolean;
 }
 
 /**
@@ -65,6 +70,7 @@ export default function LocationPicker({
   readOnly = false,
   height = 300,
   helperText,
+  autoLocate = false,
 }: LocationPickerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -72,7 +78,7 @@ export default function LocationPicker({
 
   // Read by the mount effect only, so the map is never torn down and rebuilt
   // just because a prop identity changed. Later changes are applied in place.
-  const initialRef = useRef({ area, readOnly });
+  const initialRef = useRef({ area, readOnly, autoLocate });
 
   // Kept in a ref so the Leaflet listeners registered once at mount always call
   // the latest callback instead of the one captured on the first render.
@@ -113,7 +119,11 @@ export default function LocationPicker({
     const container = containerRef.current;
     if (!container || mapRef.current) return;
 
-    const { area: initialArea, readOnly: initialReadOnly } = initialRef.current;
+    const {
+      area: initialArea,
+      readOnly: initialReadOnly,
+      autoLocate: initialAutoLocate,
+    } = initialRef.current;
     const bounds = L.latLngBounds(
       [initialArea.bounds.south, initialArea.bounds.west],
       [initialArea.bounds.north, initialArea.bounds.east],
@@ -146,6 +156,12 @@ export default function LocationPicker({
           longitude: event.latlng.lng,
         });
       });
+    }
+
+    // Auto-pin to the resident's current position on first load when asked.
+    // The result flows through the same `locationfound` handler as the button.
+    if (initialAutoLocate && !initialReadOnly) {
+      map.locate({ enableHighAccuracy: true, timeout: 10000 });
     }
 
     // `navigator.geolocation` through Leaflet. The result is clamped to the

@@ -1,13 +1,12 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Button from "@mui/material/Button";
-import MenuItem from "@mui/material/MenuItem";
 import Skeleton from "@mui/material/Skeleton";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
@@ -15,17 +14,25 @@ import Stack from "@mui/material/Stack";
 import Alert from "@mui/material/Alert";
 import Snackbar from "@mui/material/Snackbar";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import CampaignIcon from "@mui/icons-material/Campaign";
+import CarCrashIcon from "@mui/icons-material/CarCrash";
+import ConstructionIcon from "@mui/icons-material/Construction";
+import FamilyRestroomIcon from "@mui/icons-material/FamilyRestroom";
+import GavelIcon from "@mui/icons-material/Gavel";
+import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
+import MedicalServicesIcon from "@mui/icons-material/MedicalServices";
+import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
+import WaterIcon from "@mui/icons-material/Water";
+import type { SvgIconComponent } from "@mui/icons-material";
 import { PageHeader } from "@/components/resident/PageHeader";
 import { MediaUploader } from "@/components/shared/MediaUploader";
-import { ContactNumberField } from "@/components/shared/ContactNumberField";
-import { useResident } from "@/context/ResidentContext";
 import { useResidentDashboard } from "@/context/ResidentDashboardContext";
 import { useBarangay } from "@/hooks/useBarangay";
 import type { Coordinates } from "@/lib/geo";
-import { contactNumberError, normalizeContactNumber } from "@/lib/phone";
 import {
   INCIDENT_CATEGORIES,
   createIncidentReport,
+  reverseGeocode,
 } from "@/lib/resident";
 
 /**
@@ -44,43 +51,39 @@ const LocationPicker = dynamic(
 /**
  * New Incident Report (`/incidents/new`).
  *
- * Collects the incident category, description, a contact number and the
- * location, then submits via `POST /incident-reports` and routes to the new
- * report's detail page. The backend's rule-based triage engine assigns the
- * priority on submission.
+ * Deliberately low-friction for a panicking resident: only the incident
+ * category is required. The category is a grid of icon buttons, the map
+ * auto-pins to the resident's current location, and a free-text Location field
+ * is auto-filled from the pin (reverse-geocoded) but remains editable. The note
+ * ("Additional note / context"), the pin and the evidence are all optional.
  *
- * The location is captured two ways. The `purok` is a required selection from
- * the resident's own barangay vocabulary, and is what the backend validates — so
- * a report cannot claim a location the barangay does not cover. The optional
- * `landmark` is free text (`behind the chapel`, `house 12`) and carries the
- * human detail a purok name cannot. A map pin is captured too (stored as
- * `latitude`/`longitude`, and what responders navigate to), but it stays
- * optional so a resident can still file when the map cannot load.
+ * Submits via `POST /incident-reports` and routes to the new report's detail
+ * page. The backend's rule-based triage engine assigns the priority.
  */
 
+/** Icons for each incident category button. */
+const CATEGORY_ICONS: Record<string, SvgIconComponent> = {
+  Fire: LocalFireDepartmentIcon,
+  Flood: WaterIcon,
+  "Medical Emergency": MedicalServicesIcon,
+  "Criminal Activity": GavelIcon,
+  "Road Accident": CarCrashIcon,
+  "Domestic Dispute": FamilyRestroomIcon,
+  "Infrastructure Damage": ConstructionIcon,
+  "Public Disturbance": CampaignIcon,
+  Other: MoreHorizIcon,
+};
+
 /** Field-level problems, keyed by the input they belong to. */
-type FieldErrors = Partial<
-  Record<
-    "incidentCategory" | "descriptionText" | "purok" | "contactNumber",
-    string
-  >
->;
+type FieldErrors = Partial<Record<"incidentCategory", string>>;
 
 export default function NewIncidentReportPage() {
   const router = useRouter();
-  const { profile } = useResident();
   const { reload, addIncidentReportLocal } = useResidentDashboard();
 
   const [incidentCategory, setIncidentCategory] = useState("");
   const [descriptionText, setDescriptionText] = useState("");
-  // Older profiles store the `+63…` country-code form, which the digits-only
-  // field would reject — normalize it into the local `09…` form up front, the
-  // same way the document request form does.
-  const [contactNumber, setContactNumber] = useState(() =>
-    normalizeContactNumber(profile?.contactNumber ?? ""),
-  );
-  const [purok, setPurok] = useState("");
-  const [landmark, setLandmark] = useState("");
+  const [locationText, setLocationText] = useState("");
   const [locationPin, setLocationPin] = useState<Coordinates | null>(null);
   const [evidenceMediaUrls, setEvidenceMediaUrls] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -88,16 +91,33 @@ export default function NewIncidentReportPage() {
   const [error, setError] = useState<string | null>(null);
   const [successOpen, setSuccessOpen] = useState(false);
 
-  // Frames and clamps the incident map to the resident's own barangay, and
-  // supplies the purok vocabulary the location is chosen from.
-  const { area: mapArea, puroks, loading: barangayLoading } = useBarangay();
-  const puroksUnavailable = !barangayLoading && puroks.length === 0;
+  // Frames and clamps the incident map to the resident's own barangay.
+  const { area: mapArea } = useBarangay();
 
-  const purokHelp = barangayLoading
-    ? "Loading the purok list…"
-    : puroksUnavailable
-      ? "The purok list for this barangay is unavailable, so the location cannot be validated. Please try again later."
-      : (fieldErrors.purok ?? "Choose the purok where the incident happened.");
+  // Once the resident types their own Location text, later pin moves must not
+  // overwrite it: the auto-fill only applies while the field is untouched.
+  const locationEditedRef = useRef(false);
+
+  // Auto-fill the Location field from the pin (debounced). When the reverse
+  // geocode fails the field simply stays blank and the resident can type it.
+  useEffect(() => {
+    if (!locationPin || locationEditedRef.current) return;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void reverseGeocode(locationPin.latitude, locationPin.longitude).then(
+        (address) => {
+          if (cancelled || !address || locationEditedRef.current) return;
+          setLocationText(address);
+        },
+      );
+    }, 900);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [locationPin]);
 
   const clearFieldError = (field: keyof FieldErrors) => {
     setFieldErrors((prev) => {
@@ -118,19 +138,6 @@ export default function NewIncidentReportPage() {
     if (!incidentCategory) {
       next.incidentCategory = "Choose the incident category.";
     }
-    if (!descriptionText.trim()) {
-      next.descriptionText = "Describe what happened.";
-    }
-    if (!purok) {
-      next.purok = "Choose the purok where this happened.";
-    }
-    // Required: responders need a number to call. The shared field already
-    // sanitizes as you type, so this only catches a blank/malformed value at
-    // the submit boundary.
-    const contactProblem = contactNumberError(contactNumber, { required: true });
-    if (contactProblem) {
-      next.contactNumber = contactProblem;
-    }
     return next;
   };
 
@@ -146,12 +153,8 @@ export default function NewIncidentReportPage() {
     try {
       const created = await createIncidentReport({
         incidentCategory,
-        descriptionText,
-        purok,
-        landmark: landmark.trim() || undefined,
-        // Blank means "use the number on my profile" — the backend fills the
-        // gap from the resident record.
-        contactNumber: normalizeContactNumber(contactNumber) || undefined,
+        descriptionText: descriptionText.trim(),
+        landmark: locationText.trim() || undefined,
         latitude: locationPin?.latitude,
         longitude: locationPin?.longitude,
         evidenceMediaUrls,
@@ -191,71 +194,65 @@ export default function NewIncidentReportPage() {
             </Alert>
           )}
 
-          {puroksUnavailable && (
-            <Alert severity="warning" sx={{ mb: 2.5 }}>
-              {"We could not load the purok list for this barangay, so the incident location cannot be validated right now. Please reload the page or try again later."}
-            </Alert>
-          )}
-
           <Box component="form" onSubmit={handleSubmit} noValidate>
             <Stack spacing={2.5}>
-              <TextField
-                select
-                label="Incident Category"
-                required
-                fullWidth
-                value={incidentCategory}
-                onChange={(e) => {
-                  setIncidentCategory(e.target.value);
-                  clearFieldError("incidentCategory");
-                }}
-                error={!!fieldErrors.incidentCategory}
-                inputProps={{ "aria-label": "Incident category" }}
-                helperText={
-                  fieldErrors.incidentCategory ??
-                  "Choose the category that best fits the incident."
-                }
-              >
-                {INCIDENT_CATEGORIES.map((category) => (
-                  <MenuItem key={category} value={category}>
-                    {category}
-                  </MenuItem>
-                ))}
-              </TextField>
+              <Box>
+                <Typography
+                  variant="subtitle2"
+                  component="h2"
+                  sx={{ fontWeight: 700, mb: 1 }}
+                >
+                  Incident Category
+                </Typography>
+                <Box
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: { xs: "1fr 1fr", sm: "1fr 1fr 1fr" },
+                    gap: 1,
+                  }}
+                >
+                  {INCIDENT_CATEGORIES.map((category) => {
+                    const Icon = CATEGORY_ICONS[category] ?? MoreHorizIcon;
+                    const selected = incidentCategory === category;
+                    return (
+                      <Button
+                        key={category}
+                        type="button"
+                        variant={selected ? "contained" : "outlined"}
+                        color="primary"
+                        startIcon={<Icon />}
+                        aria-pressed={selected}
+                        onClick={() => {
+                          setIncidentCategory(category);
+                          clearFieldError("incidentCategory");
+                        }}
+                        sx={{
+                          justifyContent: "flex-start",
+                          textAlign: "left",
+                          textTransform: "none",
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        {category}
+                      </Button>
+                    );
+                  })}
+                </Box>
+                <Typography
+                  variant="caption"
+                  color={
+                    fieldErrors.incidentCategory ? "error" : "text.secondary"
+                  }
+                  sx={{ display: "block", mt: 0.5 }}
+                >
+                  {fieldErrors.incidentCategory ??
+                    "Choose the category that best fits the incident."}
+                </Typography>
+              </Box>
 
-              <TextField
-                label="Description"
-                required
-                fullWidth
-                multiline
-                minRows={4}
-                value={descriptionText}
-                onChange={(e) => {
-                  setDescriptionText(e.target.value);
-                  clearFieldError("descriptionText");
-                }}
-                error={!!fieldErrors.descriptionText}
-                inputProps={{ "aria-label": "Incident description" }}
-                placeholder="Describe what happened…"
-                helperText={fieldErrors.descriptionText}
-              />
-
-              {/* Carried on the report so responders can call the reporter
-                  without leaving the record. Required — a valid 11-digit PH
-                  mobile starting with 09. */}
-              <ContactNumberField
-                value={contactNumber}
-                onChange={(next) => {
-                  setContactNumber(next);
-                  clearFieldError("contactNumber");
-                }}
-                required
-                error={!!fieldErrors.contactNumber}
-                helperText={fieldErrors.contactNumber}
-              />
-
-              {/* Pin the exact spot. The map is clamped to the barangay, and
-                  the pin is the precise location responders navigate to. */}
+              {/* Pin the exact spot. The map auto-pins to the resident's current
+                  location and is clamped to the barangay; the pin is the precise
+                  location responders navigate to. */}
               <Box>
                 <Typography
                   variant="subtitle2"
@@ -268,43 +265,35 @@ export default function NewIncidentReportPage() {
                   value={locationPin}
                   onChange={setLocationPin}
                   area={mapArea}
+                  autoLocate
                 />
               </Box>
 
-              {/* The validated half of the location. The purok must be one the
-                  resident's barangay recognises, which is what makes the
-                  location enforceable instead of free text. */}
+              {/* Auto-filled from the pin, but editable so the resident can add
+                  the human detail (a street, house number or landmark). */}
               <TextField
-                select
-                label="Purok"
-                required
+                label="Location"
                 fullWidth
-                value={purok}
-                disabled={barangayLoading || puroksUnavailable}
+                value={locationText}
                 onChange={(e) => {
-                  setPurok(e.target.value);
-                  clearFieldError("purok");
+                  locationEditedRef.current = true;
+                  setLocationText(e.target.value);
                 }}
-                error={!!fieldErrors.purok || puroksUnavailable}
-                inputProps={{ "aria-label": "Purok" }}
-                helperText={purokHelp}
-              >
-                {puroks.map((option) => (
-                  <MenuItem key={option} value={option}>
-                    {option}
-                  </MenuItem>
-                ))}
-              </TextField>
+                inputProps={{ "aria-label": "Incident location" }}
+                placeholder="e.g. 123 Rizal Street, near the covered court…"
+                helperText="Auto-filled from the map pin. You can edit this to add a landmark or house number."
+              />
 
-              {/* The human half: a purok name alone rarely pinpoints a spot. */}
               <TextField
-                label="Landmark / House No."
+                label="Additional Note / Context"
                 fullWidth
-                value={landmark}
-                onChange={(e) => setLandmark(e.target.value)}
-                inputProps={{ "aria-label": "Landmark or house number" }}
-                placeholder="House 12, near the covered court…"
-                helperText="Optional. Add a street, house number or nearby landmark so responders can find the exact spot."
+                multiline
+                minRows={4}
+                value={descriptionText}
+                onChange={(e) => setDescriptionText(e.target.value)}
+                inputProps={{ "aria-label": "Additional note or context" }}
+                placeholder="Describe what happened (optional)…"
+                helperText="Optional. Any extra detail that helps responders."
               />
 
               {/* Evidence media (uploaded via S3 presigned URLs). */}
@@ -345,7 +334,7 @@ export default function NewIncidentReportPage() {
                 color="primary"
                 size="large"
                 fullWidth
-                disabled={submitting || barangayLoading || puroksUnavailable}
+                disabled={submitting}
               >
                 {submitting ? "Submitting…" : "Submit Report"}
               </Button>

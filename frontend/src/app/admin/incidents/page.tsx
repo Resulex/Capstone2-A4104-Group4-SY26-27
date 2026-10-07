@@ -42,12 +42,14 @@ import UnarchiveIcon from "@mui/icons-material/Unarchive";
 import ForumIcon from "@mui/icons-material/Forum";
 import HistoryIcon from "@mui/icons-material/History";
 import ImageIcon from "@mui/icons-material/Image";
+import MovieIcon from "@mui/icons-material/Movie";
 import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
 import MarkEmailUnreadIcon from "@mui/icons-material/MarkEmailUnread";
 import { useAdminNotifications } from "@/context/AdminNotificationsContext";
 import { useAuth } from "@/context/AuthContext";
 import { useOnlineStatus } from "@/context/OnlineStatusContext";
 import { TimelineSteps } from "@/components/shared/TimelineSteps";
+import { MediaPreviewDialog } from "@/components/shared/MediaPreviewDialog";
 import { ArchiveConfirmDialog } from "@/components/admin/ArchiveConfirmDialog";
 import { ArchiveScopeToggle } from "@/components/admin/ArchiveScopeToggle";
 import { useCanArchive } from "@/hooks/useCanArchive";
@@ -67,7 +69,7 @@ import {
   updateIncidentReport,
 } from "@/lib/admin";
 import { coordinatesFrom } from "@/lib/geo";
-import { isImageUrl } from "@/lib/uploads";
+import { isImageUrl, isVideoUrl, fileNameOf } from "@/lib/uploads";
 
 /**
  * Banner map: the same keyless Leaflet/OpenStreetMap base the resident incident
@@ -252,6 +254,15 @@ function IncidentsPageContent() {
   const [historyIncident, setHistoryIncident] = useState<IncidentRecord | null>(
     null,
   );
+  /**
+   * Media lightbox: which report's evidence is being browsed and the item the
+   * admin clicked. `urls` is captured so the dialog keeps the list even if the
+   * queue refetches underneath it.
+   */
+  const [mediaPreview, setMediaPreview] = useState<{
+    urls: string[];
+    index: number;
+  } | null>(null);
   /**
    * Location-cell hover: the banner map narrows to that report AND a mini map
    * opens under the cell, so the pin is visible without scrolling back up to the
@@ -758,31 +769,71 @@ function IncidentsPageContent() {
                       </TableCell>
                       <TableCell>
                         {incident.evidenceMediaUrls?.length ? (
-                          <Stack direction="row" spacing={1} alignItems="center">
-                            <IconButton
-                              size="small"
-                              component="a"
-                              href={incident.evidenceMediaUrls[0]}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label="View evidence media"
-                            >
-                              {isImageUrl(incident.evidenceMediaUrls[0]) ? (
-                                <Avatar
-                                  variant="rounded"
-                                  src={incident.evidenceMediaUrls[0]}
-                                  alt="Evidence"
-                                  sx={{ width: 48, height: 48 }}
-                                >
-                                  <ImageIcon />
-                                </Avatar>
-                              ) : (
-                                <ImageIcon />
-                              )}
-                            </IconButton>
-                            {incident.evidenceMediaUrls.length > 1 && (
+                          <Stack direction="row" spacing={0.5} alignItems="center">
+                            {/* Show up to three thumbnails; clicking any opens the
+                                lightbox at that item, so every attached photo (and
+                                video) is previewable. The rest stay reachable via
+                                the dialog's prev/next navigation. */}
+                            {incident.evidenceMediaUrls
+                              .slice(0, 3)
+                              .map((url, index) => (
+                                <Tooltip key={`${url}-${index}`} title={fileNameOf(url)}>
+                                  <IconButton
+                                    size="small"
+                                    aria-label={`Preview ${fileNameOf(url)}`}
+                                    onClick={() =>
+                                      setMediaPreview({
+                                        urls: incident.evidenceMediaUrls ?? [],
+                                        index,
+                                      })
+                                    }
+                                  >
+                                    {isImageUrl(url) ? (
+                                      <Avatar
+                                        variant="rounded"
+                                        src={url}
+                                        alt={fileNameOf(url)}
+                                        sx={{ width: 48, height: 48 }}
+                                      >
+                                        <ImageIcon />
+                                      </Avatar>
+                                    ) : isVideoUrl(url) ? (
+                                      <Box
+                                        sx={{
+                                          width: 48,
+                                          height: 48,
+                                          borderRadius: 1,
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          bgcolor: "action.hover",
+                                          color: "text.secondary",
+                                        }}
+                                      >
+                                        <MovieIcon />
+                                      </Box>
+                                    ) : (
+                                      <Box
+                                        sx={{
+                                          width: 48,
+                                          height: 48,
+                                          borderRadius: 1,
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          bgcolor: "action.hover",
+                                          color: "text.secondary",
+                                        }}
+                                      >
+                                        <ImageIcon />
+                                      </Box>
+                                    )}
+                                  </IconButton>
+                                </Tooltip>
+                              ))}
+                            {incident.evidenceMediaUrls.length > 3 && (
                               <Typography variant="caption" color="text.secondary">
-                                +{incident.evidenceMediaUrls.length - 1}
+                                +{incident.evidenceMediaUrls.length - 3}
                               </Typography>
                             )}
                           </Stack>
@@ -1091,6 +1142,15 @@ function IncidentsPageContent() {
         busy={pendingId !== null}
         onConfirm={handleArchiveAction}
         onCancel={() => setPendingArchive(null)}
+      />
+
+      {/* Evidence lightbox: browses ALL of a report's attached media (photos,
+          videos, and any other file) with prev/next navigation. */}
+      <MediaPreviewDialog
+        open={Boolean(mediaPreview)}
+        urls={mediaPreview?.urls ?? []}
+        initialIndex={mediaPreview?.index ?? 0}
+        onClose={() => setMediaPreview(null)}
       />
     </Box>
   );
