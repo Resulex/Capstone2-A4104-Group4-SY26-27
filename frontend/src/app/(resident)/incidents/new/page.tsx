@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
@@ -53,8 +53,9 @@ const LocationPicker = dynamic(
  *
  * Deliberately low-friction for a panicking resident: only the incident
  * category is required. The category is a grid of icon buttons, the map
- * auto-pins to the resident's current location, and a free-text Location field
- * is auto-filled from the pin (reverse-geocoded) but remains editable. The note
+ * auto-pins to the resident's current location, and the pin's reverse-geocoded
+ * address is shown next to the coordinates and submitted as the report's
+ * written location. The note
  * ("Additional note / context"), the pin and the evidence are all optional.
  *
  * Submits via `POST /incident-reports` and routes to the new report's detail
@@ -83,7 +84,7 @@ export default function NewIncidentReportPage() {
 
   const [incidentCategory, setIncidentCategory] = useState("");
   const [descriptionText, setDescriptionText] = useState("");
-  const [locationText, setLocationText] = useState("");
+  const [pinAddress, setPinAddress] = useState<string | null>(null);
   const [locationPin, setLocationPin] = useState<Coordinates | null>(null);
   const [evidenceMediaUrls, setEvidenceMediaUrls] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -94,21 +95,24 @@ export default function NewIncidentReportPage() {
   // Frames and clamps the incident map to the resident's own barangay.
   const { area: mapArea } = useBarangay();
 
-  // Once the resident types their own Location text, later pin moves must not
-  // overwrite it: the auto-fill only applies while the field is untouched.
-  const locationEditedRef = useRef(false);
-
-  // Auto-fill the Location field from the pin (debounced). When the reverse
-  // geocode fails the field simply stays blank and the resident can type it.
+  // Reverse-geocode the pin into a human-readable address (debounced) and show
+  // it next to the coordinates. The same address is submitted as the report's
+  // `landmark`, so the admin list keeps a written location.
   useEffect(() => {
-    if (!locationPin || locationEditedRef.current) return;
+    if (!locationPin) {
+      setPinAddress(null);
+      return;
+    }
+
+    // Clear the previous address immediately so a moving pin never shows a
+    // stale address while the new lookup is in flight.
+    setPinAddress(null);
 
     let cancelled = false;
     const timer = setTimeout(() => {
       void reverseGeocode(locationPin.latitude, locationPin.longitude).then(
         (address) => {
-          if (cancelled || !address || locationEditedRef.current) return;
-          setLocationText(address);
+          if (!cancelled) setPinAddress(address);
         },
       );
     }, 900);
@@ -154,7 +158,7 @@ export default function NewIncidentReportPage() {
       const created = await createIncidentReport({
         incidentCategory,
         descriptionText: descriptionText.trim(),
-        landmark: locationText.trim() || undefined,
+        landmark: pinAddress?.trim() || undefined,
         latitude: locationPin?.latitude,
         longitude: locationPin?.longitude,
         evidenceMediaUrls,
@@ -265,24 +269,10 @@ export default function NewIncidentReportPage() {
                   value={locationPin}
                   onChange={setLocationPin}
                   area={mapArea}
+                  address={pinAddress}
                   autoLocate
                 />
               </Box>
-
-              {/* Auto-filled from the pin, but editable so the resident can add
-                  the human detail (a street, house number or landmark). */}
-              <TextField
-                label="Location"
-                fullWidth
-                value={locationText}
-                onChange={(e) => {
-                  locationEditedRef.current = true;
-                  setLocationText(e.target.value);
-                }}
-                inputProps={{ "aria-label": "Incident location" }}
-                placeholder="e.g. 123 Rizal Street, near the covered court…"
-                helperText="Auto-filled from the map pin. You can edit this to add a landmark or house number."
-              />
 
               <TextField
                 label="Additional Note / Context"

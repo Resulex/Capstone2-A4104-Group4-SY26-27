@@ -1,5 +1,6 @@
 import { deleteApi, fetchJson, getApi, patchApi, postApi } from "@/lib/api";
 import type { AssignedAdminRole } from "@/lib/rbac";
+import { coordinatesFrom, formatCoordinates } from "@/lib/geo";
 
 /**
  * Data types + fetch helpers for the admin residents and document-request
@@ -255,18 +256,26 @@ export interface IncidentRecord extends ArchiveMetadata {
  * The location line for an incident, in one place so every surface agrees.
  *
  * Newer reports carry a validated `purok` plus an optional free-text `landmark`;
- * older ones carry only the legacy `locationDetails` prose. Falling back keeps
- * the pre-purok records rendering without a migration or a special case.
+ * older ones carry only the legacy `locationDetails` prose. When none of those
+ * exist (the reverse geocoder failed), the line falls back to the pin's
+ * coordinates, so a report with a map pin always has a written location.
  */
 export function formatIncidentLocation(
-  record: Pick<IncidentRecord, "purok" | "landmark" | "locationDetails">,
+  record: Pick<
+    IncidentRecord,
+    "purok" | "landmark" | "locationDetails" | "latitude" | "longitude"
+  >,
 ): string {
   const structured = [record.purok, record.landmark]
     .map((part) => part?.trim())
     .filter((part): part is string => !!part)
     .join(" — ");
 
-  return structured || record.locationDetails?.trim() || "";
+  const locationText = structured || record.locationDetails?.trim() || "";
+  if (locationText) return locationText;
+
+  const coordinates = coordinatesFrom(record);
+  return coordinates ? formatCoordinates(coordinates) : "";
 }
 
 /** An announcement record. */

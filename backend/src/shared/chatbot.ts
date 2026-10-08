@@ -51,6 +51,9 @@ export interface PortalContext {
     contactNumber?: string;
     emailAddress?: string;
     officeAddress?: string;
+    officeHours?: string[];
+    emergencyHotline?: string;
+    emergencyMobile?: string;
   } | null;
   officials: Array<{
     fullName: string;
@@ -290,10 +293,60 @@ const ANNOUNCEMENT_KEYWORDS = [
 ];
 
 const BARANGAY_CONTACT_KEYWORDS = [
-  'barangay hall', 'office address', 'contact number', 'hotline', 'telepono',
-  'address ng barangay', 'where is the barangay', 'saan ang barangay',
-  'barangay office', 'tawagan',
+  'barangay contact', 'barangay hall', 'barangay office', 'barangay phone',
+  'contact the barangay', 'kontakin ang barangay', 'tawagan ang barangay',
+  'barangay contact number', "barangay's number", 'telepono ng barangay',
+  'address ng barangay', 'saan ang barangay', 'where is the barangay',
 ];
+
+const BARANGAY_EMAIL_KEYWORDS = [
+  'barangay email', 'email ng barangay', "barangay's email",
+  'email address ng barangay',
+];
+
+const OFFICE_HOURS_KEYWORDS = [
+  'office hours', 'orario', 'oras ng opisina', 'operating hours',
+  'bukas ang barangay hall',
+];
+
+const EMERGENCY_KEYWORDS = [
+  'emergency hotline', 'emergency number', 'emergency mobile',
+  'emergency contact', 'emergency contact number',
+];
+
+/**
+ * Compose the barangay contact card for the keyword fallback. Omits fields the
+ * live document does not carry (older rows predate the contact fields).
+ */
+function barangayContactAnswer(
+  b: NonNullable<PortalContext['barangay']>,
+  tagalog: boolean
+): string {
+  const lines: string[] = [];
+  const locality = [b.city, b.province].filter(Boolean).join(', ');
+
+  if (tagalog) {
+    lines.push(`Ang barangay ay ${b.name}${locality ? `, ${locality}` : ''}.`);
+    if (b.officeAddress) lines.push(`Barangay hall: ${b.officeAddress}`);
+    if (b.contactNumber) lines.push(`Contact number: ${b.contactNumber}`);
+    if (b.emailAddress) lines.push(`Email: ${b.emailAddress}`);
+    if (b.officeHours && b.officeHours.length > 0)
+      lines.push(`Office hours: ${b.officeHours.join('; ')}`);
+    if (b.emergencyHotline) lines.push(`Emergency hotline: ${b.emergencyHotline}`);
+    if (b.emergencyMobile) lines.push(`Emergency mobile: ${b.emergencyMobile}`);
+  } else {
+    lines.push(`The barangay is ${b.name}${locality ? `, ${locality}` : ''}.`);
+    if (b.officeAddress) lines.push(`Barangay hall: ${b.officeAddress}`);
+    if (b.contactNumber) lines.push(`Contact number: ${b.contactNumber}`);
+    if (b.emailAddress) lines.push(`Email: ${b.emailAddress}`);
+    if (b.officeHours && b.officeHours.length > 0)
+      lines.push(`Office hours: ${b.officeHours.join('; ')}`);
+    if (b.emergencyHotline) lines.push(`Emergency hotline: ${b.emergencyHotline}`);
+    if (b.emergencyMobile) lines.push(`Emergency mobile: ${b.emergencyMobile}`);
+  }
+
+  return lines.join('\n');
+}
 
 /**
  * Answer factual questions from the live context. Returns null when the
@@ -339,20 +392,14 @@ function liveDataReply(
       : `Here are the latest announcements:\n${list}`;
   }
 
-  if (hasKeyword(q, BARANGAY_CONTACT_KEYWORDS) && context.barangay) {
-    const b = context.barangay;
-    if (tagalog) {
-      const parts = [`Ang barangay ay ${b.name}`];
-      if (b.city) parts.push(`${b.city}${b.province ? `, ${b.province}` : ''}`);
-      if (b.officeAddress) parts.push(`Ang barangay hall ay nasa ${b.officeAddress}`);
-      if (b.contactNumber) parts.push(`Telepono: ${b.contactNumber}`);
-      return `${parts.join('. ')}.`;
-    }
-    const parts = [`The barangay is ${b.name}`];
-    if (b.city) parts.push(`${b.city}${b.province ? `, ${b.province}` : ''}`);
-    if (b.officeAddress) parts.push(`The barangay hall is at ${b.officeAddress}`);
-    if (b.contactNumber) parts.push(`Contact: ${b.contactNumber}`);
-    return `${parts.join('. ')}.`;
+  const barangayQuestion =
+    hasKeyword(q, BARANGAY_CONTACT_KEYWORDS) ||
+    hasKeyword(q, BARANGAY_EMAIL_KEYWORDS) ||
+    hasKeyword(q, OFFICE_HOURS_KEYWORDS) ||
+    hasKeyword(q, EMERGENCY_KEYWORDS);
+
+  if (barangayQuestion && context.barangay) {
+    return barangayContactAnswer(context.barangay, tagalog);
   }
 
   return null;
@@ -417,6 +464,9 @@ export async function buildPortalContext(): Promise<PortalContext> {
         contactNumber: barangayDoc.contactNumber,
         emailAddress: barangayDoc.emailAddress,
         officeAddress: barangayDoc.officeAddress,
+        officeHours: barangayDoc.officeHours,
+        emergencyHotline: barangayDoc.emergencyHotline,
+        emergencyMobile: barangayDoc.emergencyMobile,
       }
     : null;
 
@@ -452,6 +502,12 @@ function formatPortalContext(context: PortalContext): string {
     if (b.officeAddress) lines.push(`Barangay hall address: ${b.officeAddress}.`);
     if (b.contactNumber) lines.push(`Barangay contact number: ${b.contactNumber}.`);
     if (b.emailAddress) lines.push(`Barangay email: ${b.emailAddress}.`);
+    if (b.officeHours && b.officeHours.length > 0)
+      lines.push(`Office hours: ${b.officeHours.join('; ')}.`);
+    if (b.emergencyHotline)
+      lines.push(`Emergency hotline: ${b.emergencyHotline}.`);
+    if (b.emergencyMobile)
+      lines.push(`Emergency mobile: ${b.emergencyMobile}.`);
   }
 
   if (context.officials.length > 0) {
