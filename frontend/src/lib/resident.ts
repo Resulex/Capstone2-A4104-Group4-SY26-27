@@ -244,8 +244,8 @@ export async function createIncidentReport(body: {
   /** Optional free-text note/context. Empty is fine. */
   descriptionText?: string;
   /**
-   * Free-text location (the map pin's reverse-geocoded address, editable).
-   * Optional — the backend accepts a report with no written location.
+   * Reverse-geocoded address of the map pin (auto-filled). Optional — when the
+   * geocoder fails or no pin was placed, the report is filed without one.
    */
   landmark?: string;
   /**
@@ -255,7 +255,7 @@ export async function createIncidentReport(body: {
   contactNumber?: string;
   /**
    * Pin from the incident map picker. Optional — the map may be unavailable, so
-   * a resident can still file a report with only the written location.
+   * a resident can still file a report without coordinates.
    */
   latitude?: number;
   longitude?: number;
@@ -368,7 +368,7 @@ export async function fetchBarangays(): Promise<BarangayRecord[]> {
  * (public OSM Nominatim behind `GET /geocoding/reverse`).
  *
  * Best-effort: never throws — resolves to `null` when the lookup fails, so the
- * form can fall back to a blank Location field the resident fills in themselves.
+ * caption shows only the coordinates and no address.
  */
 export async function reverseGeocode(
   latitude: number,

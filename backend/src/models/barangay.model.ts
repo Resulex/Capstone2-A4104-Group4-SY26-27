@@ -30,6 +30,10 @@ export interface IBarangay extends Document {
   contactNumber?: string;
   emailAddress?: string;
   officeAddress?: string;
+  /** Weekly office hours lines (e.g. "Monday–Friday: 8:00 AM – 5:00 PM"). */
+  officeHours?: string[];
+  emergencyHotline?: string;
+  emergencyMobile?: string;
   /**
    * Barangay hall / town center. Optional because rows created before this
    * field existed carry no coordinates; the UI falls back to a hardcoded
@@ -82,6 +86,9 @@ const barangaySchema = new Schema<IBarangay>(
     contactNumber: { type: String, trim: true },
     emailAddress: { type: String, trim: true },
     officeAddress: { type: String, trim: true },
+    officeHours: { type: [String], default: [] },
+    emergencyHotline: { type: String, trim: true },
+    emergencyMobile: { type: String, trim: true },
     // Deliberately optional: dev rows seeded before the map picker existed have
     // no coordinates and must still validate on update. The frontend falls back
     // to a hardcoded barangay area in that case.

@@ -46,6 +46,8 @@ export interface LocationPickerProps {
    * current location" button is kept either way; this only skips the first tap.
    */
   autoLocate?: boolean;
+  /** Reverse-geocoded address of the current pin, shown after the coordinates. */
+  address?: string | null;
 }
 
 /**
@@ -71,6 +73,7 @@ export default function LocationPicker({
   height = 300,
   helperText,
   autoLocate = false,
+  address,
 }: LocationPickerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -335,7 +338,7 @@ export default function LocationPicker({
         sx={{ display: "block", mt: 0.5 }}
       >
         {value
-          ? `Pinned at ${formatCoordinates(value)}`
+          ? `Pinned at ${formatCoordinates(value)}${address ? ` (${address})` : ""}`
           : (helperText ??
             (readOnly
               ? "No pinned location for this report."

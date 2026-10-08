@@ -15,6 +15,9 @@ interface UpdateBarangayBody {
   contactNumber?: string;
   emailAddress?: string;
   officeAddress?: string;
+  officeHours?: string[];
+  emergencyHotline?: string;
+  emergencyMobile?: string;
   isActive?: boolean;
 }
 
@@ -47,6 +50,9 @@ export async function updateBarangay(
   if (body.contactNumber !== undefined) barangay.contactNumber = body.contactNumber;
   if (body.emailAddress !== undefined) barangay.emailAddress = body.emailAddress;
   if (body.officeAddress !== undefined) barangay.officeAddress = body.officeAddress;
+  if (body.officeHours !== undefined) barangay.officeHours = body.officeHours;
+  if (body.emergencyHotline !== undefined) barangay.emergencyHotline = body.emergencyHotline;
+  if (body.emergencyMobile !== undefined) barangay.emergencyMobile = body.emergencyMobile;
   if (body.isActive !== undefined) barangay.isActive = body.isActive;
 
   await barangay.save();

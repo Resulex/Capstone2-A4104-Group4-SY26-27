@@ -12,6 +12,10 @@ export interface SeedBarangay {
   contactNumber: string;
   emailAddress: string;
   officeAddress: string;
+  /** Weekly office hours lines. */
+  officeHours: string[];
+  emergencyHotline: string;
+  emergencyMobile: string;
   /** Barangay hall / town center (WGS84 decimal degrees). */
   center: { latitude: number; longitude: number };
   /** Box used to clamp the incident location picker to the barangay. */
@@ -93,6 +97,13 @@ export const BARANGAY: SeedBarangay = {
   contactNumber: '(049) 1234 567',
   emailAddress: 'barangayhall.labuin@kabarangayconnect.gov.ph',
   officeAddress: 'Barangay Hall, Purok 2, Labuin, Pila, Laguna',
+  officeHours: [
+    'Monday–Friday: 8:00 AM – 5:00 PM',
+    'Saturday: 8:00 AM – 12:00 PM',
+    'Sunday: Closed',
+  ],
+  emergencyHotline: '(049) 123-4567',
+  emergencyMobile: '+63 912 123 4567',
   center: { latitude: 14.24459, longitude: 121.3694078 },
   bounds: {
     north: 14.2522804,
