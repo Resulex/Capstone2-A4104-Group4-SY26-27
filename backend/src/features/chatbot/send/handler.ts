@@ -7,6 +7,7 @@ import { ChatbotConversation } from '../../../models';
 import { getAuthContext } from '../../../shared/authorization';
 import {
   generateChatReply,
+  buildPortalContext,
   ChatbotMessage,
   CHATBOT_MAX_MESSAGES,
   CHATBOT_MAX_MESSAGE_LENGTH,
@@ -61,7 +62,10 @@ export async function sendMessage(
     userTurn,
   ].slice(-CHATBOT_MAX_MESSAGES);
 
-  const reply = await generateChatReply(history);
+  // Live snapshot (barangay, active officials, latest announcements) injected
+  // into the prompt so the assistant can answer factual portal questions.
+  const portalContext = await buildPortalContext();
+  const reply = await generateChatReply(history, portalContext);
 
   // Persist the new pair, dropping the oldest turns past the cap.
   const updated = [

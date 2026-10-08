@@ -13,7 +13,17 @@
  *
  * The assistant is informational only: it explains how the resident portal
  * works and where to find things, but never performs actions or changes data.
+ *
+ * Factual portal questions (e.g. "who is the current barangay captain?") are
+ * answered from a live snapshot of the database (`buildPortalContext`) that is
+ * injected into the system prompt at request time — and used by the keyword
+ * fallback too — so answers reflect the actual barangay, officials, and
+ * announcements rather than a static guide.
  */
+
+import { Official } from '../models/official.model';
+import { Barangay } from '../models/barangay.model';
+import { Announcement } from '../models/announcement.model';
 
 export type ChatbotMessage = {
   role: 'user' | 'assistant';
@@ -26,11 +36,45 @@ export const CHATBOT_MAX_MESSAGES = 40;
 /** Cap on a single user message (characters). */
 export const CHATBOT_MAX_MESSAGE_LENGTH = 2000;
 
+/**
+ * Live snapshot of the portal data the assistant may be asked about. Built at
+ * request time and injected into the model's system prompt; also used by the
+ * no-key keyword fallback so both paths answer from the same facts.
+ */
+export interface PortalContext {
+  barangay: {
+    name: string;
+    city: string;
+    province: string;
+    region: string;
+    zipCode?: string;
+    contactNumber?: string;
+    emailAddress?: string;
+    officeAddress?: string;
+  } | null;
+  officials: Array<{
+    fullName: string;
+    designatedPosition: string;
+    contactNumber?: string;
+    officeLocation?: string;
+  }>;
+  announcements: Array<{ titleText: string; eventDate?: string }>;
+}
+
+/** Context used when nothing could be loaded (or the caller has no data). */
+const EMPTY_CONTEXT: PortalContext = {
+  barangay: null,
+  officials: [],
+  announcements: [],
+};
+
 /** Knowledge-base entry used by the no-key keyword fallback. */
 interface KnowledgeEntry {
-  /** Lowercase keyword fragments that indicate the topic. */
+  /** Lowercase keyword fragments (English and Tagalog) that indicate the topic. */
   keywords: string[];
   answer: string;
+  /** Tagalog answer; the fallback falls back to `answer` when absent. */
+  answerTagalog?: string;
 }
 
 /**
@@ -43,67 +87,103 @@ const KNOWLEDGE_BASE: KnowledgeEntry[] = [
     keywords: [
       'document', 'clearance', 'certificate', 'request document',
       'barangay clearance', 'indigency', 'track document', 'document request',
-      'request status', 'ready for pickup', 'my document',
+      'request status', 'ready for pickup', 'my document', 'dokumento',
+      'sertipikasyon', 'sertipiko', 'kumuha ng clearance', 'kumuha ng dokumento',
+      'request ng dokumento', 'status ng request',
     ],
     answer:
       'You can request documents under My Document Requests. Tap "Request Document", choose the type (e.g. Barangay Clearance), fill in the purpose, and submit. You can then open the request any time to see its status and timeline.',
+    answerTagalog:
+      'Puwede kang mag-request ng mga dokumento sa My Document Requests. I-tap ang "Request Document", piliin ang uri (hal. Barangay Clearance), ilagay ang layunin, at i-submit. Maaari mong buksan ang request anumang oras para makita ang status at timeline nito.',
   },
   {
     keywords: [
       'incident', 'report', 'emergency', 'fire', 'flood', 'accident',
       'report incident', 'new incident', 'crime', 'priority', 'triage',
+      'insidente', 'sunog', 'baha', 'aksidente', 'krimen',
+      'mag-report ng insidente', 'bagong insidente',
     ],
     answer:
       'To report an incident, open My Incident Reports and tap "New Incident Report". Choose the category, describe what happened, and set the location. The system assigns a priority, and you can chat with responders from Live Chat.',
+    answerTagalog:
+      'Para mag-report ng insidente, buksan ang My Incident Reports at i-tap ang "New Incident Report". Piliin ang kategorya, ilarawan ang nangyari, at itakda ang lokasyon. Ang sistema ang magtatalaga ng priority, at maaari kang makipag-chat sa mga responder sa Live Chat.',
   },
   {
     keywords: [
       'chat', 'live chat', 'message', 'talk', 'responder', 'barangay staff',
-      'contact barangay',
+      'contact barangay', 'mensahe', 'makausap', 'kausapin', 'kontakin ang barangay',
     ],
     answer:
       'Live Chat lets you talk to barangay staff about your requests and reports. Open Live Chat from the menu; conversations appear there once a staff member replies.',
+    answerTagalog:
+      'Ang Live Chat ay para makausap mo ang mga barangay staff tungkol sa iyong mga request at report. Buksan ang Live Chat sa menu; lalabas doon ang mga usapan kapag may sumagot nang staff.',
   },
   {
-    keywords: ['announcement', 'news', 'update', 'advisory'],
+    keywords: ['announcement', 'news', 'update', 'advisory', 'anunsyo', 'anunsiyo', 'balita', 'abiso'],
     answer:
       'Barangay announcements are under Announcements in the menu. Open one to read the full post.',
+    answerTagalog:
+      'Nasa Announcements sa menu ang mga anunsyo ng barangay. Buksan ito para mabasa ang buong post.',
   },
   {
-    keywords: ['official', 'captain', 'councilor', 'barangay officials', 'who'],
+    keywords: [
+      'official', 'captain', 'councilor', 'barangay officials', 'who',
+      'opisyal', 'opisyales', 'kapitan', 'kagawad', 'kalihim', 'ingat-yaman',
+      'sino ang',
+    ],
     answer:
       'You can see the current barangay officials under Barangay Officials in the menu.',
+    answerTagalog:
+      'Makikita mo ang mga kasalukuyang opisyal ng barangay sa Barangay Officials sa menu.',
   },
   {
     keywords: [
       'account', 'profile', 'contact number', 'phone', 'update profile',
       'delete account', 'email', 'my information', 'change my',
+      'numero ng telepono', 'i-update ang profile', 'burahin ang account',
+      'aking impormasyon', 'palitan',
     ],
     answer:
       'Your profile details come from your Google sign-in. To change them, open Account Settings — corrections are shared from your Google account, and you can manage account options (including deletion) there.',
+    answerTagalog:
+      'Ang iyong profile ay mula sa iyong Google sign-in. Para baguhin ito, buksan ang Account Settings — ang mga pagwawasto ay mula sa iyong Google account, at maaari mong pamahalaan ang account options (kasama ang pag-delete) doon.',
   },
   {
-    keywords: ['notification', 'alert', 'bell', 'unread', 'notify'],
+    keywords: [
+      'notification', 'alert', 'bell', 'unread', 'notify', 'notipikasyon',
+      'alerto', 'hindi pa nababasa',
+    ],
     answer:
       'Notifications show alerts about your document requests, incident reports, and chats. Open Notifications from the menu to see them; the header bell shows your unread count.',
+    answerTagalog:
+      'Ipinapakita ng Notifications ang mga alerto tungkol sa iyong document requests, incident reports, at chats. Buksan ang Notifications sa menu; ang bell sa header ay nagpapakita ng bilang ng hindi pa nababasa.',
   },
   {
     keywords: [
       'accessibility', 'text size', 'font', 'high contrast', 'display',
-      'contrast',
+      'contrast', 'laki ng text', 'kaibahan',
     ],
     answer:
       'You can adjust text size and enable high contrast under Display & Accessibility in the menu.',
+    answerTagalog:
+      'Maaari mong baguhin ang laki ng text at i-enable ang high contrast sa Display & Accessibility sa menu.',
   },
   {
-    keywords: ['help', 'support', 'hotline', 'faq', 'assist'],
+    keywords: ['help', 'support', 'hotline', 'faq', 'assist', 'tulong', 'suporta'],
     answer:
       'The Help & Support Center has frequently asked questions and contact options for the barangay administration, including the emergency hotline.',
+    answerTagalog:
+      'Ang Help & Support Center ay may mga frequently asked questions at contact options para sa barangay administration, kasama ang emergency hotline.',
   },
   {
-    keywords: ['privacy', 'terms', 'data', 'legal', 'ra 10173', 'consent'],
+    keywords: [
+      'privacy', 'terms', 'data', 'legal', 'ra 10173', 'consent',
+      'pahintulot', 'privacy policy',
+    ],
     answer:
       'Your data is handled under the Data Privacy Act of 2012 (RA 10173). See Data Privacy & Terms in the menu for the full policy.',
+    answerTagalog:
+      'Ang iyong data ay pinangangasiwaan alinsunod sa Data Privacy Act of 2012 (RA 10173). Tingnan ang Data Privacy & Terms sa menu para sa buong patakaran.',
   },
 ];
 
@@ -124,20 +204,35 @@ const PORTAL_GUIDE = [
   'Residents sign in with Google, and must accept the terms on first use before accessing the portal.',
 ].join('\n');
 
-const SYSTEM_PROMPT = [
-  'You are "KaBarangay Assistant", the help assistant inside the KaBarangayConnect resident portal.',
-  '',
-  'Your job is to answer questions about using the resident portal: its features, how to do things, and where to find them.',
-  '',
-  'Rules:',
-  '1. Stay in scope. Answer only questions about the KaBarangayConnect resident portal and the barangay services it provides. If asked anything unrelated, politely decline and offer to help with the portal instead.',
-  '2. Information only. You must never perform actions or change anything on the user\'s behalf. You cannot submit requests, edit profiles, change contact details, send messages, change settings, or delete accounts. Instead, explain how the user can do it themselves and name the exact page to use.',
-  '3. Be accurate and concise. Give the page name and the key steps. Do not invent features that do not exist.',
-  '4. Use the portal guide below as your source of truth.',
-  '',
-  'Portal guide:',
-  PORTAL_GUIDE,
-].join('\n');
+/**
+ * System prompt for the hosted model. The live context is appended as a
+ * "Current barangay information" section so factual questions are answered
+ * from data rather than from the static guide.
+ */
+function buildSystemPrompt(contextText: string): string {
+  const sections = [
+    'You are "KaBarangay Assistant", the help assistant inside the KaBarangayConnect resident portal.',
+    '',
+    'Your job is to answer questions about using the resident portal: its features, how to do things, and where to find them.',
+    '',
+    'Rules:',
+    '1. Stay in scope. Answer only questions about the KaBarangayConnect resident portal and the barangay services it provides. If asked anything unrelated, politely decline and offer to help with the portal instead.',
+    '2. Information only. You must never perform actions or change anything on the user\'s behalf. You cannot submit requests, edit profiles, change contact details, send messages, change settings, or delete accounts. Instead, explain how the user can do it themselves and name the exact page to use.',
+    '3. Be accurate and concise. Give the page name and the key steps. Do not invent features that do not exist.',
+    '4. Use the portal guide below as your source of truth for how to use the portal.',
+    '5. Language. Reply in the same language the user writes in. If the user writes in Filipino/Tagalog, reply in Tagalog; if in Cebuano, Ilocano, or another Philippine language, reply in that language; if in English, reply in English. Match the language of the user\'s latest message.',
+    '6. Live data. Use the "Current barangay information" section to answer factual questions — e.g. who the barangay captain is, who the officials are, the latest announcements, and contact details. If the answer is not in that section, say you do not know rather than guessing.',
+    '',
+    'Portal guide:',
+    PORTAL_GUIDE,
+  ];
+
+  if (contextText) {
+    sections.push('', 'Current barangay information:', contextText);
+  }
+
+  return sections.join('\n');
+}
 
 /** Message shape sent to the hosted model (includes the system turn). */
 interface ChatCompletionMessage {
@@ -146,13 +241,134 @@ interface ChatCompletionMessage {
 }
 
 /** Build the full chat-completion message list from the conversation history. */
-function buildMessages(history: ChatbotMessage[]): ChatCompletionMessage[] {
-  return [{ role: 'system', content: SYSTEM_PROMPT }, ...history];
+function buildMessages(
+  history: ChatbotMessage[],
+  contextText: string
+): ChatCompletionMessage[] {
+  return [
+    { role: 'system', content: buildSystemPrompt(contextText) },
+    ...history,
+  ];
+}
+
+const TAGALOG_WORDS = [
+  'sino', 'ano', 'paano', 'saan', 'kailan', 'bakit', 'magkano', 'ilan',
+  'gusto', 'kumuha', 'makakuha', 'kailangan', 'tulong', 'nasaan', 'kunin',
+  'ipakita', 'makita', 'anunsyo', 'kapitan', 'kagawad', 'opisyal',
+  'pinakabagong', 'gumawa',
+];
+
+const TAGALOG_PHRASES = [
+  'paano mag', 'ano ang', 'sino ang', 'gusto ko', 'saan makikita',
+  'paano ba', 'magkano ang', 'pano', 'mag request',
+];
+
+/** Best-effort Tagalog/Filipino detection for the no-key keyword fallback. */
+function detectTagalog(text: string): boolean {
+  const q = text.toLowerCase();
+  if (TAGALOG_PHRASES.some((phrase) => q.includes(phrase))) return true;
+  return TAGALOG_WORDS.some(
+    (word) => new RegExp(`(^|[^a-z])${word}($|[^a-z])`).test(q)
+  );
+}
+
+function hasKeyword(q: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => q.includes(keyword));
+}
+
+const CAPTAIN_KEYWORDS = ['captain', 'kapitan', 'punong barangay'];
+
+const OFFICIAL_KEYWORDS = [
+  'official', 'officials', 'councilor', 'councilors', 'kagawad', 'opisyal',
+  'opisyales', 'secretary', 'kalihim', 'treasurer', 'ingat-yaman', 'captain',
+  'kapitan', 'punong barangay',
+];
+
+const ANNOUNCEMENT_KEYWORDS = [
+  'announcement', 'announcements', 'anunsyo', 'anunsiyo', 'abiso',
+  'pinakabagong', 'balita', 'news',
+];
+
+const BARANGAY_CONTACT_KEYWORDS = [
+  'barangay hall', 'office address', 'contact number', 'hotline', 'telepono',
+  'address ng barangay', 'where is the barangay', 'saan ang barangay',
+  'barangay office', 'tawagan',
+];
+
+/**
+ * Answer factual questions from the live context. Returns null when the
+ * question is not a live-data question, so the caller falls back to the static
+ * knowledge base.
+ */
+function liveDataReply(
+  q: string,
+  context: PortalContext,
+  tagalog: boolean
+): string | null {
+  const captain = context.officials.find((officer) => {
+    const position = officer.designatedPosition.toLowerCase();
+    return position.includes('captain') || position.includes('punong barangay');
+  });
+
+  if (hasKeyword(q, CAPTAIN_KEYWORDS) && captain) {
+    return tagalog
+      ? `Ang kasalukuyang Barangay Captain ay si ${captain.fullName}.`
+      : `The current Barangay Captain is ${captain.fullName}.`;
+  }
+
+  if (hasKeyword(q, OFFICIAL_KEYWORDS) && context.officials.length > 0) {
+    const list = context.officials
+      .map((officer) => `${officer.designatedPosition}: ${officer.fullName}`)
+      .join(', ');
+    return tagalog
+      ? `Ang kasalukuyang mga opisyal ng barangay: ${list}.`
+      : `The current barangay officials: ${list}.`;
+  }
+
+  if (hasKeyword(q, ANNOUNCEMENT_KEYWORDS) && context.announcements.length > 0) {
+    const list = context.announcements
+      .map(
+        (announcement) =>
+          `- ${announcement.titleText}${
+            announcement.eventDate ? ` (${announcement.eventDate.slice(0, 10)})` : ''
+          }`
+      )
+      .join('\n');
+    return tagalog
+      ? `Ito ang mga pinakabagong anunsyo:\n${list}`
+      : `Here are the latest announcements:\n${list}`;
+  }
+
+  if (hasKeyword(q, BARANGAY_CONTACT_KEYWORDS) && context.barangay) {
+    const b = context.barangay;
+    if (tagalog) {
+      const parts = [`Ang barangay ay ${b.name}`];
+      if (b.city) parts.push(`${b.city}${b.province ? `, ${b.province}` : ''}`);
+      if (b.officeAddress) parts.push(`Ang barangay hall ay nasa ${b.officeAddress}`);
+      if (b.contactNumber) parts.push(`Telepono: ${b.contactNumber}`);
+      return `${parts.join('. ')}.`;
+    }
+    const parts = [`The barangay is ${b.name}`];
+    if (b.city) parts.push(`${b.city}${b.province ? `, ${b.province}` : ''}`);
+    if (b.officeAddress) parts.push(`The barangay hall is at ${b.officeAddress}`);
+    if (b.contactNumber) parts.push(`Contact: ${b.contactNumber}`);
+    return `${parts.join('. ')}.`;
+  }
+
+  return null;
 }
 
 /** Deterministic fallback used when no provider key is configured. */
-export function keywordReply(userText: string): string {
+export function keywordReply(
+  userText: string,
+  context: PortalContext = EMPTY_CONTEXT
+): string {
   const q = userText.toLowerCase();
+  const tagalog = detectTagalog(q);
+
+  const live = liveDataReply(q, context, tagalog);
+  if (live) return live;
+
   let best: KnowledgeEntry | null = null;
   let bestScore = 0;
 
@@ -167,9 +383,97 @@ export function keywordReply(userText: string): string {
     }
   }
 
-  if (best && bestScore > 0) return best.answer;
+  if (best && bestScore > 0) {
+    return tagalog && best.answerTagalog ? best.answerTagalog : best.answer;
+  }
 
-  return 'I can help with the KaBarangayConnect resident portal — for example requesting documents, reporting incidents, reading announcements, or account settings. What would you like to know?';
+  return tagalog
+    ? 'Pwede kitang tulungan sa KaBarangayConnect resident portal — gaya ng pag-request ng dokumento, pag-report ng insidente, pagbasa ng mga anunsyo, o sa account settings. Ano ang gusto mong malaman?'
+    : 'I can help with the KaBarangayConnect resident portal — for example requesting documents, reporting incidents, reading announcements, or account settings. What would you like to know?';
+}
+
+/** Build the live portal snapshot from the database. */
+export async function buildPortalContext(): Promise<PortalContext> {
+  const [barangayDoc, officialDocs, announcementDocs] = await Promise.all([
+    Barangay.findOne({ isActive: { $ne: false } }).lean(),
+    Official.find({ isDeleted: { $ne: true } })
+      .select('fullName designatedPosition contactNumber officeLocation')
+      .sort({ createdAt: 1 })
+      .lean(),
+    Announcement.find({ isHidden: { $ne: true }, isArchived: { $ne: true } })
+      .select('titleText eventDate')
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .lean(),
+  ]);
+
+  const barangay = barangayDoc
+    ? {
+        name: barangayDoc.name,
+        city: barangayDoc.city,
+        province: barangayDoc.province,
+        region: barangayDoc.region,
+        zipCode: barangayDoc.zipCode,
+        contactNumber: barangayDoc.contactNumber,
+        emailAddress: barangayDoc.emailAddress,
+        officeAddress: barangayDoc.officeAddress,
+      }
+    : null;
+
+  return {
+    barangay,
+    officials: officialDocs.map((officer) => ({
+      fullName: officer.fullName,
+      designatedPosition: officer.designatedPosition,
+      contactNumber: officer.contactNumber,
+      officeLocation: officer.officeLocation,
+    })),
+    announcements: announcementDocs.map((announcement) => ({
+      titleText: announcement.titleText,
+      eventDate: announcement.eventDate
+        ? new Date(announcement.eventDate).toISOString()
+        : undefined,
+    })),
+  };
+}
+
+/** Render the snapshot into the text block injected into the system prompt. */
+function formatPortalContext(context: PortalContext): string {
+  const lines: string[] = [];
+
+  if (context.barangay) {
+    const b = context.barangay;
+    const locality = [b.city, b.province].filter(Boolean).join(', ');
+    lines.push(
+      `Barangay: ${b.name}${locality ? `, ${locality}` : ''}${
+        b.region ? ` (${b.region})` : ''
+      }${b.zipCode ? `, ZIP ${b.zipCode}` : ''}.`
+    );
+    if (b.officeAddress) lines.push(`Barangay hall address: ${b.officeAddress}.`);
+    if (b.contactNumber) lines.push(`Barangay contact number: ${b.contactNumber}.`);
+    if (b.emailAddress) lines.push(`Barangay email: ${b.emailAddress}.`);
+  }
+
+  if (context.officials.length > 0) {
+    lines.push('Current officials:');
+    for (const officer of context.officials) {
+      lines.push(
+        `- ${officer.designatedPosition}: ${officer.fullName}${
+          officer.contactNumber ? ` (${officer.contactNumber})` : ''
+        }`
+      );
+    }
+  }
+
+  if (context.announcements.length > 0) {
+    lines.push('Latest announcements:');
+    for (const announcement of context.announcements) {
+      const date = announcement.eventDate ? announcement.eventDate.slice(0, 10) : '';
+      lines.push(`- ${announcement.titleText}${date ? ` (${date})` : ''}`);
+    }
+  }
+
+  return lines.join('\n');
 }
 
 interface ChatCompletionResponse {
@@ -178,7 +482,8 @@ interface ChatCompletionResponse {
 
 async function callDeepSeek(
   apiKey: string,
-  history: ChatbotMessage[]
+  history: ChatbotMessage[],
+  contextText: string
 ): Promise<string> {
   const baseUrl = (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/+$/, '');
   const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
@@ -191,7 +496,7 @@ async function callDeepSeek(
     },
     body: JSON.stringify({
       model,
-      messages: buildMessages(history),
+      messages: buildMessages(history, contextText),
       temperature: 0.4,
       max_tokens: 500,
     }),
@@ -212,7 +517,8 @@ async function callDeepSeek(
 async function callHuggingFace(
   apiKey: string,
   model: string,
-  history: ChatbotMessage[]
+  history: ChatbotMessage[],
+  contextText: string
 ): Promise<string> {
   const res = await fetch(
     `https://api-inference.huggingface.co/models/${model}/v1/chat/completions`,
@@ -224,7 +530,7 @@ async function callHuggingFace(
       },
       body: JSON.stringify({
         model,
-        messages: buildMessages(history),
+        messages: buildMessages(history, contextText),
         temperature: 0.4,
         max_tokens: 500,
       }),
@@ -248,11 +554,15 @@ async function callHuggingFace(
  *
  * Provider and credentials come from environment variables. When the selected
  * provider is not configured, `keywordReply` serves the last user message so
- * the endpoint still returns something useful.
+ * the endpoint still returns something useful. `context` is the live portal
+ * snapshot injected into the prompt (and the fallback) so factual questions
+ * are answered from data.
  */
 export async function generateChatReply(
-  history: ChatbotMessage[]
+  history: ChatbotMessage[],
+  context: PortalContext = EMPTY_CONTEXT
 ): Promise<string> {
+  const contextText = formatPortalContext(context);
   const provider = (process.env.CHATBOT_PROVIDER || 'deepseek').toLowerCase();
   const lastUser = [...history]
     .reverse()
@@ -261,12 +571,12 @@ export async function generateChatReply(
   if (provider === 'huggingface') {
     const apiKey = process.env.HUGGINGFACE_API_KEY;
     const model = process.env.HUGGINGFACE_MODEL;
-    if (apiKey && model) return callHuggingFace(apiKey, model, history);
-    return keywordReply(lastUser?.content ?? '');
+    if (apiKey && model) return callHuggingFace(apiKey, model, history, contextText);
+    return keywordReply(lastUser?.content ?? '', context);
   }
 
   // Default (deepseek) and any unknown provider value fall through here.
   const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (apiKey) return callDeepSeek(apiKey, history);
-  return keywordReply(lastUser?.content ?? '');
+  if (apiKey) return callDeepSeek(apiKey, history, contextText);
+  return keywordReply(lastUser?.content ?? '', context);
 }
