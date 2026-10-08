@@ -24,6 +24,13 @@ export interface IBarangay extends Document {
   region: string;
   zipCode?: string;
   /**
+   * Barangay hall contact details. Optional because rows seeded before these
+   * fields existed carry none; the chatbot simply omits what is absent.
+   */
+  contactNumber?: string;
+  emailAddress?: string;
+  officeAddress?: string;
+  /**
    * Barangay hall / town center. Optional because rows created before this
    * field existed carry no coordinates; the UI falls back to a hardcoded
    * barangay area when it is absent.
@@ -70,6 +77,11 @@ const barangaySchema = new Schema<IBarangay>(
     province: { type: String, required: true, trim: true },
     region: { type: String, required: true, trim: true },
     zipCode: { type: String, trim: true },
+    // Optional contact details; rows seeded before these existed have none and
+    // must still validate/save (same rule as `center`/`bounds`/`puroks`).
+    contactNumber: { type: String, trim: true },
+    emailAddress: { type: String, trim: true },
+    officeAddress: { type: String, trim: true },
     // Deliberately optional: dev rows seeded before the map picker existed have
     // no coordinates and must still validate on update. The frontend falls back
     // to a hardcoded barangay area in that case.

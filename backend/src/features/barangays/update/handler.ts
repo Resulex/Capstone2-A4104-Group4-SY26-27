@@ -12,6 +12,9 @@ interface UpdateBarangayBody {
   province?: string;
   region?: string;
   zipCode?: string;
+  contactNumber?: string;
+  emailAddress?: string;
+  officeAddress?: string;
   isActive?: boolean;
 }
 
@@ -41,6 +44,9 @@ export async function updateBarangay(
   if (body.province !== undefined) barangay.province = body.province;
   if (body.region !== undefined) barangay.region = body.region;
   if (body.zipCode !== undefined) barangay.zipCode = body.zipCode;
+  if (body.contactNumber !== undefined) barangay.contactNumber = body.contactNumber;
+  if (body.emailAddress !== undefined) barangay.emailAddress = body.emailAddress;
+  if (body.officeAddress !== undefined) barangay.officeAddress = body.officeAddress;
   if (body.isActive !== undefined) barangay.isActive = body.isActive;
 
   await barangay.save();

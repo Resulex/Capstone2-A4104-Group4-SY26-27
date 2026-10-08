@@ -27,6 +27,7 @@ const QUICK_REPLIES = [
   "How do I request a Barangay Clearance?",
   "How do I report an incident?",
   "Where do I see announcements?",
+  "Sino ang kasalukuyang kapitan ng barangay?",
 ];
 
 /** Panel width on screens wide enough for the full panel. */

@@ -8,6 +8,10 @@ export interface SeedBarangay {
   province: string;
   region: string;
   zipCode: string;
+  /** Barangay hall contact details surfaced by the resident chatbot. */
+  contactNumber: string;
+  emailAddress: string;
+  officeAddress: string;
   /** Barangay hall / town center (WGS84 decimal degrees). */
   center: { latitude: number; longitude: number };
   /** Box used to clamp the incident location picker to the barangay. */
@@ -86,6 +90,9 @@ export const BARANGAY: SeedBarangay = {
   province: 'Laguna',
   region: 'CALABARZON',
   zipCode: '4010',
+  contactNumber: '(049) 1234 567',
+  emailAddress: 'barangayhall.labuin@kabarangayconnect.gov.ph',
+  officeAddress: 'Barangay Hall, Purok 2, Labuin, Pila, Laguna',
   center: { latitude: 14.24459, longitude: 121.3694078 },
   bounds: {
     north: 14.2522804,
