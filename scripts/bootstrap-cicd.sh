@@ -351,6 +351,10 @@ Add these to ${REPO_SLUG} -> Settings -> Secrets and variables -> Actions:
 
 Plus MONGODB_URI, JWT_SECRET, TOTP_SECRET_ENCRYPTION_KEY, GOOGLE_CLIENT_SECRET
 (and the COGNITO_*/GOOGLE_*/S3_*/TOTP_* variables listed in docs/CICD.md).
+
+The resident AI assistant also needs a DEEPSEEK_API_KEY secret; without it the
+deploy's preflight fails (an empty value would silently degrade the chatbot to
+its keyword fallback).
 SUMMARY
   exit 0
 fi
@@ -407,6 +411,13 @@ set_variable NEXT_PUBLIC_WEBSOCKET_URL   "${NEXT_PUBLIC_WEBSOCKET_URL}"
 for key in MONGODB_URI JWT_SECRET TOTP_SECRET_ENCRYPTION_KEY GOOGLE_CLIENT_SECRET OAUTH_STATE_SECRET COGNITO_CLIENT_SECRET; do
   set_secret "${key}" "$(env_value "${key}" || true)"
 done
+
+# Resident AI assistant. Sourced from backend/.env like the other secrets; if
+# the value is absent there, set_secret warns and skips it, which is fine for
+# local development (the chatbot then runs its keyword fallback) — but the
+# deploy workflow's preflight REQUIRES it, so a missing secret fails the deploy
+# rather than silently shipping an empty key.
+set_secret DEEPSEEK_API_KEY "$(env_value DEEPSEEK_API_KEY || true)"
 
 for key in JWT_EXPIRES_IN TOTP_ISSUER TOTP_ENROLLMENT_JWT_TTL COGNITO_USER_POOL_ID \
            COGNITO_CLIENT_ID COGNITO_REGION GOOGLE_CLIENT_ID GOOGLE_REDIRECT_URI \

@@ -85,6 +85,14 @@ jobs:
       # the WebSocket API the `ws-*` functions create. A loopback value is
       # refused at runtime unless IS_OFFLINE=true — never point it at localhost.
       WEBSOCKET_ENDPOINT: ${{ vars.WEBSOCKET_ENDPOINT }}
+      # Resident AI assistant (`src/shared/chatbot.ts`). serverless.yml resolves
+      # this with `${env:DEEPSEEK_API_KEY, ''}`, so an unset value ships an
+      # EMPTY string — `generateChatReply()` then fails its `if (apiKey)` check
+      # and silently degrades every reply to the keyword fallback, with no error
+      # in any log. Deployed symptom on 2026-10-10: the assistant only ever
+      # returned the canned fallback text. It is also listed in the preflight
+      # below, so a blank value now fails the deploy instead of degrading.
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       # Deployed functions must talk to the real Cognito pool; `true` is a
       # local-development escape hatch only.
       COGNITO_OFFLINE: 'false'
@@ -111,7 +119,10 @@ jobs:
           # WEBSOCKET_ENDPOINT is here for the same reason as the COGNITO_* trio:
           # an unset value ships an empty string and turns real-time push into a
           # silent no-op instead of failing the deploy.
-          for name in AWS_DEPLOY_ROLE_ARN AWS_REGION STAGE API_BACKEND_URL APP_BASE_URL MONGODB_URI JWT_SECRET TOTP_SECRET_ENCRYPTION_KEY COGNITO_USER_POOL_ID COGNITO_CLIENT_ID COGNITO_CLIENT_SECRET WEBSOCKET_ENDPOINT; do
+          # DEEPSEEK_API_KEY is here for the same reason as WEBSOCKET_ENDPOINT:
+          # an unset value ships an empty string and silently degrades the
+          # resident AI assistant to the keyword fallback instead of failing.
+          for name in AWS_DEPLOY_ROLE_ARN AWS_REGION STAGE API_BACKEND_URL APP_BASE_URL MONGODB_URI JWT_SECRET TOTP_SECRET_ENCRYPTION_KEY COGNITO_USER_POOL_ID COGNITO_CLIENT_ID COGNITO_CLIENT_SECRET WEBSOCKET_ENDPOINT DEEPSEEK_API_KEY; do
             if [ -z "${!name:-}" ]; then missing+=("$name"); fi
           done
           if [ ${#missing[@]} -gt 0 ]; then
