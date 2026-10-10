@@ -18,6 +18,7 @@
     "migrate:down": "ts-node src/scripts/migrate.ts down",
     "migrate:status": "ts-node src/scripts/migrate.ts status",
     "verify:migrations": "ts-node src/scripts/verify-migrations.ts",
+    "check:chatbot": "ts-node src/scripts/check-chatbot.ts",
     "migrate:create": "ts-node src/scripts/migrate-create.ts",
     "seed": "ts-node src/scripts/seed.ts",
     "seed:reset": "ts-node src/scripts/seed.ts --reset",

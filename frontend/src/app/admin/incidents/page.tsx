@@ -690,9 +690,6 @@ function IncidentsPageContent() {
                     <TableCell sx={{ fontWeight: 700 }}>Category</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Reporter</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>
-                      Contact Number
-                    </TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Media</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Priority</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
@@ -757,15 +754,6 @@ function IncidentsPageContent() {
                             {formatIncidentLocation(incident) || "—"}
                           </Typography>
                         </Tooltip>
-                      </TableCell>
-                      <TableCell>
-                        <Typography
-                          variant="body2"
-                          noWrap
-                          sx={{ maxWidth: 160 }}
-                        >
-                          {incident.contactNumber || "—"}
-                        </Typography>
                       </TableCell>
                       <TableCell>
                         {incident.evidenceMediaUrls?.length ? (
