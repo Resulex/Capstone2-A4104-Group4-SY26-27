@@ -123,6 +123,7 @@ Set by the bootstrap; listed here so the pipeline can be reproduced by hand.
 | `GOOGLE_CLIENT_SECRET` | `backend/.env` | resident Google SSO |
 | `OAUTH_STATE_SECRET` | `backend/.env` | optional; falls back to `JWT_SECRET` |
 | `COGNITO_CLIENT_SECRET` | `backend/.env` | `SECRET_HASH` for the Cognito challenge calls; only needed when the app client has a generated secret |
+| `DEEPSEEK_API_KEY` | `backend/.env` | resident AI assistant LLM provider (`src/shared/chatbot.ts`). Required by the deploy preflight: an empty value is falsy, so every reply silently degrades to the keyword fallback |
 
 **Variables**
 
