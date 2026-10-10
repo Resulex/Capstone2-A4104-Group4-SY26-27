@@ -15,6 +15,7 @@ import SmartToyIcon from "@mui/icons-material/SmartToy";
 import SendIcon from "@mui/icons-material/Send";
 import CloseIcon from "@mui/icons-material/Close";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import { ChatMarkdown } from "@/components/resident/ChatMarkdown";
 import {
   ChatbotMessage,
   clearChatbotConversation,
@@ -247,11 +248,18 @@ export function ResidentChatbot() {
                       border:
                         message.role === "assistant" ? 1 : 0,
                       borderColor: "divider",
-                      whiteSpace: "pre-wrap",
+                      // Plain-text bubbles keep their newlines; Markdown
+                      // bubbles must not, or block elements gain extra gaps.
+                      whiteSpace:
+                        message.role === "user" ? "pre-wrap" : "normal",
                       wordBreak: "break-word",
                     }}
                   >
-                    <Typography variant="body2">{message.content}</Typography>
+                    {message.role === "assistant" ? (
+                      <ChatMarkdown content={message.content} />
+                    ) : (
+                      <Typography variant="body2">{message.content}</Typography>
+                    )}
                   </Box>
                 ))}
                 {sending && (
