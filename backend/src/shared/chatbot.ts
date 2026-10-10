@@ -81,80 +81,159 @@ interface KnowledgeEntry {
 }
 
 /**
- * Portal knowledge base — mirrors the resident sidebar (`ResidentSidebar`) and
- * the resident help FAQ. Used by the keyword fallback; the system prompt below
- * carries the authoritative, full guide for the hosted model.
+ * Portal knowledge base — mirrors the resident sidebar (`ResidentSidebar`),
+ * the resident help FAQ, and the request forms. Used by the keyword fallback;
+ * the system prompt above carries the authoritative full guide for the hosted
+ * model. Entries are ordered most-specific first because the scorer breaks
+ * ties by keeping the earliest entry with the highest match count.
  */
 const KNOWLEDGE_BASE: KnowledgeEntry[] = [
   {
     keywords: [
       'document', 'clearance', 'certificate', 'request document',
-      'barangay clearance', 'indigency', 'track document', 'document request',
-      'request status', 'ready for pickup', 'my document', 'dokumento',
-      'sertipikasyon', 'sertipiko', 'kumuha ng clearance', 'kumuha ng dokumento',
-      'request ng dokumento', 'status ng request',
+      'barangay clearance', 'certificate of residency', 'residency', 'indigency',
+      'certificate of indigency', 'business permit', 'good moral', 'barangay id',
+      'police clearance', 'document request', 'request ng dokumento',
+      'kumuha ng clearance',
+      'kumuha ng dokumento', 'paano kumuha', 'kumuha', 'kuha ng', 'hingi',
+      'dokumento', 'katibayan', 'sertipiko', 'sertipikasyon', 'sedula',
+      'requirements', 'requirement', 'kailangan', 'mga kailangan',
+      'ano ang kailangan', 'kailangan para', 'fee', 'fees', 'bayad', 'magkano',
+      'valid id', 'verification id', 'processing time', 'how long',
+      'gaano katagal', 'ilan araw', 'kailan makukuha', 'turnaround',
     ],
     answer:
-      'You can request documents under My Document Requests. Tap "Request Document", choose the type (e.g. Barangay Clearance), fill in the purpose, and submit. You can then open the request any time to see its status and timeline.',
+      'You can request documents under My Document Requests. Tap "Request Document", choose the type (Barangay Clearance, Certificate of Residency, Certificate of Indigency, Barangay Business Permit, Certificate of Good Moral Character, Barangay ID, or Other), choose the purpose, enter your contact number and email, and attach a photo of a valid (government-issued) ID. Processing takes about 2–3 business days and you will be contacted by phone or email; bring a valid ID when claiming at the barangay hall. Processing fees may apply as per barangay ordinance.',
     answerTagalog:
-      'Puwede kang mag-request ng mga dokumento sa My Document Requests. I-tap ang "Request Document", piliin ang uri (hal. Barangay Clearance), ilagay ang layunin, at i-submit. Maaari mong buksan ang request anumang oras para makita ang status at timeline nito.',
+      'Puwede kang mag-request ng mga dokumento sa My Document Requests. I-tap ang "Request Document", piliin ang uri (Barangay Clearance, Certificate of Residency, Certificate of Indigency, Barangay Business Permit, Certificate of Good Moral Character, Barangay ID, o Other), piliin ang layunin, ilagay ang contact number at email, at mag-attach ng litrato ng valid (government-issued) ID. Mga 2–3 business days ang pagproseso at kokontakin ka sa telepono o email; magdala ng valid ID kapag kukunin ang dokumento sa barangay hall. Maaaring may bayad ayon sa ordinansa ng barangay.',
   },
   {
     keywords: [
-      'incident', 'report', 'emergency', 'fire', 'flood', 'accident',
-      'report incident', 'new incident', 'crime', 'priority', 'triage',
-      'insidente', 'sunog', 'baha', 'aksidente', 'krimen',
-      'mag-report ng insidente', 'bagong insidente',
+      'status', 'track', 'tracking', 'ready for pickup', 'pick up', 'pickup',
+      'my document', 'my request', 'status ng request', 'status ng report',
+      'nasaan na', 'kailan ready', 'asensado',
     ],
     answer:
-      'To report an incident, open My Incident Reports and tap "New Incident Report". Choose the category, describe what happened, and set the location. The system assigns a priority, and you can chat with responders from Live Chat.',
+      'To track a request, open My Document Requests and select it — you will see its current status and timeline (Submitted, Processing, Ready for Pickup, Released, or Rejected). Incident reports are tracked the same way under My Incident Reports. Notifications also alerts you when a status changes.',
     answerTagalog:
-      'Para mag-report ng insidente, buksan ang My Incident Reports at i-tap ang "New Incident Report". Piliin ang kategorya, ilarawan ang nangyari, at itakda ang lokasyon. Ang sistema ang magtatalaga ng priority, at maaari kang makipag-chat sa mga responder sa Live Chat.',
+      'Para i-track ang request, buksan ang My Document Requests at piliin ito — makikita mo ang kasalukuyang status at timeline (Submitted, Processing, Ready for Pickup, Released, o Rejected). Ganito rin i-track ang incident reports sa My Incident Reports. May alerto rin sa Notifications kapag nagbago ang status.',
   },
   {
     keywords: [
-      'chat', 'live chat', 'message', 'talk', 'responder', 'barangay staff',
-      'contact barangay', 'mensahe', 'makausap', 'kausapin', 'kontakin ang barangay',
+      'incident', 'incident report', 'report', 'sumbong', 'ireport', 'i-report',
+      'mag-report', 'magreport', 'mag-file', 'filing', 'complaint', 'reklamo',
+      'sunog', 'fire', 'baha', 'flood', 'sakuna', 'aksidente', 'accident',
+      'gulo', 'nakawan', 'krimen', 'crime', 'domestic', 'disturbance',
+      'infrastructure', 'evidence', 'ebidensiya', 'photo', 'video', 'larawan',
+      'attach', 'upload', 'priority', 'triage', 'insidente',
+      'new incident report', 'bagong insidente', 'mag-report ng insidente',
     ],
     answer:
-      'Live Chat lets you talk to barangay staff about your requests and reports. Open Live Chat from the menu; conversations appear there once a staff member replies.',
+      'To report an incident, open My Incident Reports and tap "New Incident Report". Choose the category (Fire, Flood, Medical Emergency, Criminal Activity, Road Accident, Domestic Dispute, Infrastructure Damage, Public Disturbance, or Other), describe what happened, and set the location on the map. You can attach photos or videos as evidence. The app assigns a triage priority automatically, and responders can open a Live Chat with you. Track progress in My Incident Reports.',
     answerTagalog:
-      'Ang Live Chat ay para makausap mo ang mga barangay staff tungkol sa iyong mga request at report. Buksan ang Live Chat sa menu; lalabas doon ang mga usapan kapag may sumagot nang staff.',
-  },
-  {
-    keywords: ['announcement', 'news', 'update', 'advisory', 'anunsyo', 'anunsiyo', 'balita', 'abiso'],
-    answer:
-      'Barangay announcements are under Announcements in the menu. Open one to read the full post.',
-    answerTagalog:
-      'Nasa Announcements sa menu ang mga anunsyo ng barangay. Buksan ito para mabasa ang buong post.',
+      'Para mag-report ng insidente, buksan ang My Incident Reports at i-tap ang "New Incident Report". Piliin ang kategorya (Fire, Flood, Medical Emergency, Criminal Activity, Road Accident, Domestic Dispute, Infrastructure Damage, Public Disturbance, o Other), ilarawan ang nangyari, at itakda ang lokasyon sa mapa. Maaari kang mag-attach ng mga larawan o video bilang ebidensiya. Awtomatikong nagtatalaga ang app ng triage priority, at puwedeng magbukas ng Live Chat ang mga responder. Subaybayan ang progreso sa My Incident Reports.',
   },
   {
     keywords: [
-      'official', 'captain', 'councilor', 'barangay officials', 'who',
-      'opisyal', 'opisyales', 'kapitan', 'kagawad', 'kalihim', 'ingat-yaman',
-      'sino ang',
+      'emergency', 'emergency number', 'emergency hotline', 'emergency mobile',
+      'emergency contact', 'hotline', 'saklolo', 'tumawag', 'tatawagan',
+      'sino ang tatawagan', 'numero ng emergency', 'ambulance', 'police',
+      'pulis', 'bumbero', 'tanod', '911',
     ],
     answer:
-      'You can see the current barangay officials under Barangay Officials in the menu.',
+      'For an emergency, call the barangay emergency hotline or emergency mobile, or 911 for national emergency services (police, fire, ambulance). The barangay numbers are shown under Help & Support Center and in the "Current barangay information" section. For non-urgent concerns, file an incident report under My Incident Reports.',
     answerTagalog:
-      'Makikita mo ang mga kasalukuyang opisyal ng barangay sa Barangay Officials sa menu.',
+      'Sa emergency, tumawag sa emergency hotline o emergency mobile ng barangay, o sa 911 para sa national emergency services (pulis, bumbero, ambulansya). Nasa Help & Support Center ang mga numero ng barangay. Para sa hindi agarang usapin, mag-file ng incident report sa My Incident Reports.',
   },
   {
     keywords: [
-      'account', 'profile', 'contact number', 'phone', 'update profile',
-      'delete account', 'email', 'my information', 'change my',
-      'numero ng telepono', 'i-update ang profile', 'burahin ang account',
-      'aking impormasyon', 'palitan',
+      'official', 'officials', 'captain', 'punong barangay', 'kagawad',
+      'konsehal', 'councilor', 'councilors', 'council', 'sk chairman',
+      'sk chair', 'sk official', 'sangguniang kabataan', 'secretary', 'kalihim',
+      'treasurer', 'ingat-yaman', 'directory', 'who is', 'opisyal', 'opisyales',
+      'kapitan', 'kap', 'sino si', 'sinu-sino', 'namumuno', 'kasalukuyang kapitan',
     ],
     answer:
-      'Your profile details come from your Google sign-in. To change them, open Account Settings — corrections are shared from your Google account, and you can manage account options (including deletion) there.',
+      'You can see the current Punong Barangay (Captain), Kagawad (council members), SK Chairman, Secretary, and Treasurer under Barangay Officials in the menu, together with office hours and emergency contacts.',
     answerTagalog:
-      'Ang iyong profile ay mula sa iyong Google sign-in. Para baguhin ito, buksan ang Account Settings — ang mga pagwawasto ay mula sa iyong Google account, at maaari mong pamahalaan ang account options (kasama ang pag-delete) doon.',
+      'Makikita mo ang kasalukuyang Punong Barangay (Kapitan), mga Kagawad, SK Chairman, Secretary, at Treasurer sa Barangay Officials sa menu, kasama ang office hours at emergency contacts.',
   },
   {
     keywords: [
-      'notification', 'alert', 'bell', 'unread', 'notify', 'notipikasyon',
-      'alerto', 'hindi pa nababasa',
+      'office hours', 'oras ng opisina', 'operating hours', 'open', 'bukas',
+      'bukas ba', 'kailan bukas', 'weekend', 'sabado', 'linggo', 'holiday',
+      'location', 'address', 'where is', 'saan banda', 'saan ang barangay',
+      'lugar', 'opisina', 'barangay hall', 'hall',
+    ],
+    answer:
+      'The barangay hall is open on weekdays and usually half-day on Saturdays, and closed on Sundays and holidays. The exact office hours, address, and location are shown under Help & Support Center and Barangay Officials, and in the "Current barangay information" section.',
+    answerTagalog:
+      'Bukas ang barangay hall tuwing weekdays at kadalasan hanggang kalahating araw kapag Sabado, at sarado tuwing Linggo at holidays. Nasa Help & Support Center at Barangay Officials ang eksaktong office hours, address, at lokasyon.',
+  },
+  {
+    keywords: [
+      'barangay contact', 'contact the barangay', 'kontakin ang barangay',
+      'tawagan ang barangay', 'barangay contact number',
+      'contact number ng barangay', 'numero ng barangay', 'telepono ng barangay',
+      'telephone ng barangay', 'landline', 'barangay email', 'email ng barangay',
+      'email address ng barangay', 'official email', 'contact details ng barangay',
+    ],
+    answer:
+      'You can reach the barangay through its contact number, email, and emergency hotline, shown under Help & Support Center and in the "Current barangay information" section.',
+    answerTagalog:
+      'Maaari mong kontakin ang barangay sa contact number, email, at emergency hotline nito, nasa Help & Support Center at sa "Current barangay information" section.',
+  },
+  {
+    keywords: [
+      'announcement', 'announcements', 'anunsyo', 'anunsiyo', 'mga anunsyo',
+      'advisory', 'news', 'bulletin', 'abiso', 'pabatid', 'balita', 'ayuda',
+      'relief', 'pamigay', 'vaccination', 'bakuna', 'medical mission',
+      'libreng gamot', 'curfew', 'pulong', 'walang pasok',
+      'suspendido ang klase', 'bagyo', 'program', 'notice', 'notices',
+      'public notice',
+    ],
+    answer:
+      'Barangay announcements, advisories, and programs (medical missions, vaccination, relief/ayuda distribution, curfew, class suspensions) are under Announcements in the menu. Open one to read the full post; the latest ones are also listed in the "Current barangay information" section.',
+    answerTagalog:
+      'Nasa Announcements sa menu ang mga anunsyo, abiso, at programa ng barangay (medical mission, bakuna, pamamahagi ng ayuda, curfew, walang pasok). Buksan ang isa para mabasa ang buong post; nakalista rin ang mga pinakabago sa "Current barangay information" section.',
+  },
+  {
+    keywords: [
+      'chat', 'live chat', 'chat sa staff', 'message', 'mensahe', 'mensahe sa admin',
+      'responder', 'barangay staff', 'kausap', 'kausapin', 'makausap', 'makipag-chat',
+      'mag-chat', 'admin',
+    ],
+    answer:
+      'Live Chat lets you talk to barangay staff and responders about your requests and reports. A chat is started by barangay staff (after an incident or request) — you cannot open a new empty chat yourself. Once staff reply, the conversation appears under Live Chat in the menu, and you can reply there.',
+    answerTagalog:
+      'Ang Live Chat ay para makausap mo ang mga barangay staff at responder tungkol sa iyong mga request at report. Ang barangay staff ang nagbubukas ng chat (pagkatapos ng insidente o request) — hindi ka makakapagsimula ng bagong walang laman na chat. Kapag sumagot na ang staff, lalabas ang usapan sa Live Chat sa menu at makakasagot ka doon.',
+  },
+  {
+    keywords: [
+      'account', 'profile', 'login', 'log in', 'mag-log in', 'sign in', 'google',
+      'password', 'magpalit ng password', 'contact number ko', 'profile ko',
+      'i-update ang profile', 'update profile', 'delete account',
+      'burahin ang account', 'my information', 'aking impormasyon',
+    ],
+    answer:
+      'Your profile details come from your Google sign-in. To manage them, open Account Settings — corrections are shared from your Google account, and you can manage account options (including account deletion) there.',
+    answerTagalog:
+      'Ang iyong profile ay mula sa iyong Google sign-in. Para pamahalaan ito, buksan ang Account Settings — ang mga pagwawasto ay mula sa iyong Google account, at maaari mong pamahalaan ang account options (kasama ang pag-delete ng account) doon.',
+  },
+  {
+    keywords: [
+      'install', 'home screen', 'i-install', 'app sa phone', 'gamitin ang app',
+      'download app', 'mobile app',
+    ],
+    answer:
+      'The portal runs in your phone browser — there is no app-store download. To use it like an app, open it in Chrome or Safari and choose "Add to Home Screen" from the browser menu to add a shortcut on your phone.',
+    answerTagalog:
+      'Tumatakbo ang portal sa browser ng iyong phone — walang ida-download sa app store. Para magamit na parang app, buksan ito sa Chrome o Safari at piliin ang "Add to Home Screen" sa menu ng browser para magkaroon ng shortcut sa phone mo.',
+  },
+  {
+    keywords: [
+      'notification', 'notifications', 'mga notipikasyon', 'alert', 'bell',
+      'unread', 'notify', 'notipikasyon', 'alerto', 'hindi pa nababasa',
     ],
     answer:
       'Notifications show alerts about your document requests, incident reports, and chats. Open Notifications from the menu to see them; the header bell shows your unread count.',
@@ -172,7 +251,7 @@ const KNOWLEDGE_BASE: KnowledgeEntry[] = [
       'Maaari mong baguhin ang laki ng text at i-enable ang high contrast sa Display & Accessibility sa menu.',
   },
   {
-    keywords: ['help', 'support', 'hotline', 'faq', 'assist', 'tulong', 'suporta'],
+    keywords: ['help', 'support', 'faq', 'assist', 'suporta'],
     answer:
       'The Help & Support Center has frequently asked questions and contact options for the barangay administration, including the emergency hotline.',
     answerTagalog:
@@ -192,17 +271,38 @@ const KNOWLEDGE_BASE: KnowledgeEntry[] = [
 
 /** Authoritative portal guide injected into the system prompt. */
 const PORTAL_GUIDE = [
-  '- Dashboard ("/"): an overview of your document requests, incident reports, chats, and announcements.',
-  '- My Document Requests ("/documents"): request Barangay Clearance or other certificates, fill in the purpose, and track each request\'s status and timeline.',
-  '- My Incident Reports ("/incidents"): file a report (category, description, location), see its assigned priority and status, and chat with responders.',
-  '- Live Chat ("/chat"): talk to barangay staff about your requests and reports.',
-  '- Announcements ("/announcements"): read barangay announcements.',
-  '- Barangay Officials ("/officials"): see the current barangay officials.',
-  '- Account Settings ("/account"): view your profile (from Google sign-in) and manage your account.',
-  '- Notifications ("/notifications"): alerts about your requests, reports, and chats.',
+  'DOCUMENT REQUESTS — clearances & certificates. Page: My Document Requests ("/documents").',
+  '- Supported types: Barangay Clearance, Certificate of Residency, Certificate of Indigency, Barangay Business Permit, Certificate of Good Moral Character, Barangay ID, and Other.',
+  '- To request: open My Document Requests and tap "Request Document". Choose the document type, choose the purpose, enter a contact number and email address, and attach a photo of a valid, government-issued ID (the Verification ID field). Then submit.',
+  '- Requirements: document type, purpose, a reachable contact number and email, and a photo of a valid ID.',
+  '- Processing: about 2–3 business days; the resident is contacted by phone or email. Processing fees may apply as per barangay ordinance — never quote a specific fee amount. Bring a valid ID when claiming the document at the barangay hall.',
+  '- Statuses, in order: Submitted, then Processing, then Ready for Pickup, then Released (or Rejected).',
+  '- To track: open My Document Requests and select the request to see its current status and timeline. Notifications also alerts the resident when the status changes.',
+  '- A resident cannot approve, release, reject, or cancel a request from the app — barangay staff do that.',
+  '',
+  'INCIDENT REPORTS & EMERGENCY. Page: My Incident Reports ("/incidents").',
+  '- Categories: Fire, Flood, Medical Emergency, Criminal Activity, Road Accident, Domestic Dispute, Infrastructure Damage, Public Disturbance, and Other.',
+  '- To report: open My Incident Reports and tap "New Incident Report", choose the category, describe what happened, and set the location on the map. Photos or videos can be attached as evidence.',
+  '- The app assigns a triage priority automatically, and barangay responders can open a Live Chat to coordinate with the resident.',
+  '- Status and history are tracked in My Incident Reports; Notifications alerts on updates.',
+  '- Emergencies: call the barangay emergency hotline or emergency mobile (see "Current barangay information"), or 911 for national emergency services (police, fire, ambulance).',
+  '',
+  'BARANGAY OFFICIALS. Page: Barangay Officials ("/officials").',
+  '- Shows the current Punong Barangay (Barangay Captain), the Kagawad (council members), the SK Chairman, the Barangay Secretary, and the Barangay Treasurer, plus office hours and emergency contacts.',
+  '',
+  'OFFICE HOURS, ADDRESS & CONTACT. Page: Help & Support Center ("/help").',
+  '- Office hours, the barangay hall address, the official email, the telephone/hotline, and the emergency hotline/mobile are shown there and in the "Current barangay information" section.',
+  '',
+  'ANNOUNCEMENTS, PROGRAMS & NOTICES. Page: Announcements ("/announcements").',
+  '- Barangay advisories and programs — medical missions, vaccination, relief/ayuda distribution, curfew, class suspensions — are posted there; the latest ones are also in "Current barangay information".',
+  '',
+  'PORTAL, ACCOUNT & LIVE CHAT.',
+  '- Live Chat ("/chat"): conversations with barangay staff/responders about the resident\'s own requests and reports. A chat is started by barangay staff (after an incident or request), not by the resident — a resident cannot open a new empty chat. Once staff reply, the conversation appears under Live Chat.',
+  '- Account Settings ("/account"): profile details come from the resident\'s Google sign-in; account options (including account deletion) are managed there.',
+  '- Notifications ("/notifications"): alerts about requests, reports, and chats; the header bell shows the unread count.',
+  '- Phone home screen: the portal runs in the phone browser; a resident can add it to the home screen from the browser menu ("Add to Home Screen"). There is no app-store download.',
   '- Display & Accessibility ("/settings"): text size and high-contrast options.',
-  '- Help & Support Center ("/help"): frequently asked questions and barangay contact options.',
-  '- Data Privacy & Terms ("/legal"): the privacy policy and terms of service.',
+  '- Data Privacy & Terms ("/legal"): the privacy policy (Data Privacy Act of 2012, RA 10173) and the terms of service.',
   '',
   'Residents sign in with Google, and must accept the terms on first use before accessing the portal.',
 ].join('\n');
@@ -216,15 +316,16 @@ function buildSystemPrompt(contextText: string): string {
   const sections = [
     'You are "KaBarangay Assistant", the help assistant inside the KaBarangayConnect resident portal.',
     '',
-    'Your job is to answer questions about using the resident portal: its features, how to do things, and where to find them.',
+    'Your job is to answer questions about using the resident portal and the barangay services it provides: document requests (clearances & certificates), incident reporting and emergency contacts, barangay officials, office hours and contact details, announcements and programs, and how to use the portal and account.',
     '',
     'Rules:',
-    '1. Stay in scope. Answer only questions about the KaBarangayConnect resident portal and the barangay services it provides. If asked anything unrelated, politely decline and offer to help with the portal instead.',
-    '2. Information only. You must never perform actions or change anything on the user\'s behalf. You cannot submit requests, edit profiles, change contact details, send messages, change settings, or delete accounts. Instead, explain how the user can do it themselves and name the exact page to use.',
-    '3. Be accurate and concise. Give the page name and the key steps. Do not invent features that do not exist.',
+    '1. Stay in scope. Answer only questions about the KaBarangayConnect resident portal and the barangay services it provides. If asked anything unrelated (for example weather, homework, recipes, jokes, or chismis), politely decline and offer to help with the portal instead.',
+    '2. Information only. You must never perform actions or change anything on the user\'s behalf. You cannot approve, reject, release, or cancel a document request; cannot delete or edit an incident report; cannot change a status, profile, or contact details; cannot send messages; and cannot start a Live Chat conversation. When asked to do any of these, clearly say you cannot do that, then explain how the user can do it themselves and name the exact page to use.',
+    '3. Be accurate and concise. Give the page name and the key steps. Do not invent features, fees, or phone numbers that do not exist. If you are not sure, say you do not know.',
     '4. Use the portal guide below as your source of truth for how to use the portal.',
-    '5. Language. Reply in the same language the user writes in. If the user writes in Filipino/Tagalog, reply in Tagalog; if in Cebuano, Ilocano, or another Philippine language, reply in that language; if in English, reply in English. Match the language of the user\'s latest message.',
-    '6. Live data. Use the "Current barangay information" section to answer factual questions — e.g. who the barangay captain is, who the officials are, the latest announcements, and contact details. If the answer is not in that section, say you do not know rather than guessing.',
+    '5. Fees and processing. Document requests are processed in about 2–3 business days, a valid ID photo is required, and processing fees may apply as per barangay ordinance — never quote a specific fee amount.',
+    '6. Language. Reply in the same language the user writes in. If the user writes in Filipino/Tagalog, reply in Tagalog; if in Cebuano, Ilocano, or another Philippine language, reply in that language; if in English, reply in English. Match the language of the user\'s latest message.',
+    '7. Live data. Use the "Current barangay information" section to answer factual questions — e.g. who the barangay captain is, who the officials are, the latest announcements, and contact details. If the answer is not in that section, say you do not know rather than guessing. For anything urgent, give the barangay emergency hotline/mobile and mention 911.',
     '',
     'Portal guide:',
     PORTAL_GUIDE,
@@ -256,14 +357,21 @@ function buildMessages(
 
 const TAGALOG_WORDS = [
   'sino', 'ano', 'paano', 'saan', 'kailan', 'bakit', 'magkano', 'ilan',
-  'gusto', 'kumuha', 'makakuha', 'kailangan', 'tulong', 'nasaan', 'kunin',
-  'ipakita', 'makita', 'anunsyo', 'kapitan', 'kagawad', 'opisyal',
-  'pinakabagong', 'gumawa',
+  'gusto', 'kumuha', 'kuha', 'makakuha', 'kailangan', 'tulong', 'nasaan',
+  'kunin', 'ipakita', 'makita', 'anunsyo', 'kapitan', 'kagawad', 'opisyal',
+  'pinakabagong', 'gumawa', 'hingi', 'dokumento', 'katibayan', 'sedula',
+  'bayad', 'kailan makukuha', 'sinu-sino', 'namumuno', 'bukas', 'oras',
+  'lugar', 'opisina', 'numero', 'telepono', 'sabado', 'linggo', 'pabatid',
+  'ayuda', 'pamigay', 'bakuna', 'pulong', 'walang pasok', 'kausap',
+  'kausapin', 'makausap', 'magpalit', 'notipikasyon', 'sumbong', 'saklolo',
+  'sunog', 'baha', 'aksidente', 'krimen', 'nakawan', 'ipaliwanag', 'pwede',
+  'paki', 'yung', 'huwag', 'serbisyo',
 ];
 
 const TAGALOG_PHRASES = [
   'paano mag', 'ano ang', 'sino ang', 'gusto ko', 'saan makikita',
-  'paano ba', 'magkano ang', 'pano', 'mag request',
+  'paano ba', 'magkano ang', 'pano', 'mag request', 'kailan bukas',
+  'saan banda', 'sino po', 'ano po', 'paano po', 'may bayad', 'pwede po',
 ];
 
 /** Best-effort Tagalog/Filipino detection for the no-key keyword fallback. */
@@ -275,6 +383,43 @@ function detectTagalog(text: string): boolean {
   );
 }
 
+/**
+ * Action/mutation requests. The assistant is informational only, so when the
+ * user asks it to change data (rather than asking how), the reply is prefixed
+ * with an explicit refusal before the topic answer.
+ */
+const ACTION_REQUEST_PHRASES = [
+  'approve my', 'approve the', 'i-approve', 'iapprove', 'reject my',
+  'i-reject', 'ireject', 'release my', 'i-release', 'irelease', 'cancel my',
+  'i-cancel', 'icancel', 'delete my', 'delete report', 'delete the report',
+  'delete my report', 'i-delete', 'idelete', 'burahin ang', 'ipabura',
+  'remove my', 'change my status', 'update my status', 'palitan ang status',
+  'baguhin ang status', 'process my', 'asikasuhin mo', 'ayusin mo',
+  'gawin mo na', 'change my record',
+];
+
+const ACTION_VERBS = [
+  'approve', 'reject', 'release', 'cancel', 'delete', 'burahin', 'i-update',
+  'change', 'edit', 'asikasuhin', 'palitan', 'baguhin',
+];
+
+const ACTION_REQUEST_MARKERS = [
+  'can you', 'could you', 'would you', 'please', 'paki', 'pwede mo',
+  'pwede bang', 'pwede ba', 'pakiusap', 'for me', 'para sa akin', 'mo na',
+  'mo ba', 'kaya mo',
+];
+
+/** True when the user is asking the assistant to change data (not asking how). */
+function isActionRequest(q: string): boolean {
+  if (hasKeyword(q, ACTION_REQUEST_PHRASES)) return true;
+  return hasKeyword(q, ACTION_VERBS) && hasKeyword(q, ACTION_REQUEST_MARKERS);
+}
+
+const ACTION_REFUSAL_ENGLISH =
+  'I am an informational assistant, so I cannot change any records for you — I can only explain how you can do it yourself.';
+const ACTION_REFUSAL_TAGALOG =
+  'Isa akong informational assistant, kaya hindi ako makakapagbago ng anumang record para sa iyo — maipapaliwanag ko lamang kung paano mo ito magagawa mismo.';
+
 function hasKeyword(q: string, keywords: string[]): boolean {
   return keywords.some((keyword) => q.includes(keyword));
 }
@@ -282,36 +427,55 @@ function hasKeyword(q: string, keywords: string[]): boolean {
 const CAPTAIN_KEYWORDS = ['captain', 'kapitan', 'punong barangay'];
 
 const OFFICIAL_KEYWORDS = [
-  'official', 'officials', 'councilor', 'councilors', 'kagawad', 'opisyal',
-  'opisyales', 'secretary', 'kalihim', 'treasurer', 'ingat-yaman', 'captain',
-  'kapitan', 'punong barangay',
+  'official', 'officials', 'councilor', 'councilors', 'council', 'kagawad',
+  'konsehal', 'opisyal', 'opisyales', 'secretary', 'kalihim', 'treasurer',
+  'ingat-yaman', 'sk chairman', 'sk chair', 'sangguniang kabataan', 'namumuno',
+  'sinu-sino', 'directory', 'captain', 'kapitan', 'punong barangay',
 ];
 
 const ANNOUNCEMENT_KEYWORDS = [
-  'announcement', 'announcements', 'anunsyo', 'anunsiyo', 'abiso',
-  'pinakabagong', 'balita', 'news',
+  'announcement', 'announcements', 'anunsyo', 'anunsiyo', 'abiso', 'pabatid',
+  'pinakabagong', 'balita', 'news', 'bulletin', 'advisory', 'notice',
+  'notices', 'public notice', 'ayuda', 'relief', 'pamigay', 'bakuna',
+  'vaccination', 'medical mission', 'libreng gamot', 'curfew', 'pulong',
+  'walang pasok', 'suspendido ang klase',
 ];
 
 const BARANGAY_CONTACT_KEYWORDS = [
   'barangay contact', 'barangay hall', 'barangay office', 'barangay phone',
   'contact the barangay', 'kontakin ang barangay', 'tawagan ang barangay',
   'barangay contact number', "barangay's number", 'telepono ng barangay',
-  'address ng barangay', 'saan ang barangay', 'where is the barangay',
+  'numero ng barangay', 'address ng barangay', 'saan ang barangay',
+  'where is the barangay', 'saan banda', 'saan matatagpuan',
 ];
 
 const BARANGAY_EMAIL_KEYWORDS = [
   'barangay email', 'email ng barangay', "barangay's email",
-  'email address ng barangay',
+  'email address ng barangay', 'official email', 'landline',
 ];
 
 const OFFICE_HOURS_KEYWORDS = [
-  'office hours', 'orario', 'oras ng opisina', 'operating hours',
-  'bukas ang barangay hall',
+  'office hours', 'orario', 'oras ng opisina', 'oras ng barangay',
+  'operating hours', 'bukas ang barangay hall', 'bukas ba ang barangay',
+  'bukas ba', 'kailan bukas', 'open ba',
 ];
 
 const EMERGENCY_KEYWORDS = [
-  'emergency hotline', 'emergency number', 'emergency mobile',
-  'emergency contact', 'emergency contact number',
+  'emergency', 'emergency hotline', 'emergency number', 'emergency mobile',
+  'emergency contact', 'emergency contact number', 'numero ng emergency',
+  'hotline', 'saklolo', 'tumawag', 'tatawagan', 'sino ang tatawagan',
+  'ambulance', 'bumbero', 'tanod', '911',
+];
+
+/**
+ * Reporting intent. A question that asks how to report an incident belongs to
+ * the incident guide, not the emergency-contact card, even when it mentions an
+ * emergency-type event (e.g. "how do I report a flood?").
+ */
+const INCIDENT_INTENT_KEYWORDS = [
+  'report', 'i-report', 'ireport', 'mag-report', 'magreport', 'mag-file',
+  'file a report', 'filing', 'complaint', 'reklamo', 'sumbong',
+  'new incident', 'bagong insidente',
 ];
 
 /**
@@ -348,6 +512,17 @@ function barangayContactAnswer(
   return lines.join('\n');
 }
 
+/** Find an official whose position mentions one of the given role hints. */
+function findOfficialByRole(
+  officials: PortalContext['officials'],
+  hints: string[]
+): PortalContext['officials'][number] | undefined {
+  return officials.find((officer) => {
+    const position = officer.designatedPosition.toLowerCase();
+    return hints.some((hint) => position.includes(hint));
+  });
+}
+
 /**
  * Answer factual questions from the live context. Returns null when the
  * question is not a live-data question, so the caller falls back to the static
@@ -358,15 +533,56 @@ function liveDataReply(
   context: PortalContext,
   tagalog: boolean
 ): string | null {
-  const captain = context.officials.find((officer) => {
-    const position = officer.designatedPosition.toLowerCase();
-    return position.includes('captain') || position.includes('punong barangay');
-  });
+  // "How do I report…" questions belong to the incident guide, even when they
+  // mention an emergency-type event — do not short-circuit to the hotline card.
+  if (hasKeyword(q, INCIDENT_INTENT_KEYWORDS)) return null;
+
+  // Contact-type questions are checked first so a question like "ano ang
+  // emergency mobile number ni Kapitan?" returns the number, not the captain's
+  // name.
+  const asksForContact =
+    hasKeyword(q, BARANGAY_CONTACT_KEYWORDS) ||
+    hasKeyword(q, BARANGAY_EMAIL_KEYWORDS) ||
+    hasKeyword(q, OFFICE_HOURS_KEYWORDS) ||
+    hasKeyword(q, EMERGENCY_KEYWORDS);
+
+  if (asksForContact && context.barangay) {
+    return barangayContactAnswer(context.barangay, tagalog);
+  }
+
+  const captain = findOfficialByRole(context.officials, [
+    'captain',
+    'punong barangay',
+  ]);
 
   if (hasKeyword(q, CAPTAIN_KEYWORDS) && captain) {
     return tagalog
       ? `Ang kasalukuyang Barangay Captain ay si ${captain.fullName}.`
       : `The current Barangay Captain is ${captain.fullName}.`;
+  }
+
+  // Role-specific lookups (secretary / treasurer / SK) before the full list, so
+  // "sino ang secretary" names the person rather than dumping every official.
+  const roleLookups: Array<{ keywords: string[]; hints: string[] }> = [
+    { keywords: ['secretary', 'kalihim'], hints: ['secretary', 'kalihim'] },
+    {
+      keywords: ['treasurer', 'ingat-yaman'],
+      hints: ['treasurer', 'ingat-yaman'],
+    },
+    {
+      keywords: ['sk chairman', 'sk chair', 'sangguniang kabataan'],
+      hints: ['sk chairman', 'sk chair', 'sangguniang kabataan'],
+    },
+  ];
+
+  for (const role of roleLookups) {
+    if (!hasKeyword(q, role.keywords)) continue;
+    const officer = findOfficialByRole(context.officials, role.hints);
+    if (officer) {
+      return tagalog
+        ? `Ang kasalukuyang ${officer.designatedPosition} ay si ${officer.fullName}.`
+        : `The current ${officer.designatedPosition} is ${officer.fullName}.`;
+    }
   }
 
   if (hasKeyword(q, OFFICIAL_KEYWORDS) && context.officials.length > 0) {
@@ -392,16 +608,6 @@ function liveDataReply(
       : `Here are the latest announcements:\n${list}`;
   }
 
-  const barangayQuestion =
-    hasKeyword(q, BARANGAY_CONTACT_KEYWORDS) ||
-    hasKeyword(q, BARANGAY_EMAIL_KEYWORDS) ||
-    hasKeyword(q, OFFICE_HOURS_KEYWORDS) ||
-    hasKeyword(q, EMERGENCY_KEYWORDS);
-
-  if (barangayQuestion && context.barangay) {
-    return barangayContactAnswer(context.barangay, tagalog);
-  }
-
   return null;
 }
 
@@ -413,8 +619,19 @@ export function keywordReply(
   const q = userText.toLowerCase();
   const tagalog = detectTagalog(q);
 
+  // Mutation requests are refused up front, then the topic answer explains how
+  // the resident can do it themselves.
+  const refusal = isActionRequest(q)
+    ? tagalog
+      ? ACTION_REFUSAL_TAGALOG
+      : ACTION_REFUSAL_ENGLISH
+    : '';
+
+  const withRefusal = (answer: string) =>
+    refusal ? `${refusal}\n\n${answer}` : answer;
+
   const live = liveDataReply(q, context, tagalog);
-  if (live) return live;
+  if (live) return withRefusal(live);
 
   let best: KnowledgeEntry | null = null;
   let bestScore = 0;
@@ -431,12 +648,16 @@ export function keywordReply(
   }
 
   if (best && bestScore > 0) {
-    return tagalog && best.answerTagalog ? best.answerTagalog : best.answer;
+    return withRefusal(
+      tagalog && best.answerTagalog ? best.answerTagalog : best.answer
+    );
   }
 
-  return tagalog
-    ? 'Pwede kitang tulungan sa KaBarangayConnect resident portal — gaya ng pag-request ng dokumento, pag-report ng insidente, pagbasa ng mga anunsyo, o sa account settings. Ano ang gusto mong malaman?'
-    : 'I can help with the KaBarangayConnect resident portal — for example requesting documents, reporting incidents, reading announcements, or account settings. What would you like to know?';
+  return withRefusal(
+    tagalog
+      ? 'Pwede kitang tulungan sa KaBarangayConnect resident portal — gaya ng pag-request ng dokumento (clearance, certificate), pag-report ng insidente at emergency hotline, mga opisyal ng barangay, office hours at address, mga anunsyo at programa, o sa paggamit ng account. Ano ang gusto mong malaman?'
+      : 'I can help with the KaBarangayConnect resident portal — for example requesting documents (clearance, certificates), reporting incidents and emergency hotlines, barangay officials, office hours and address, announcements and programs, or using your account. What would you like to know?'
+  );
 }
 
 /** Build the live portal snapshot from the database. */

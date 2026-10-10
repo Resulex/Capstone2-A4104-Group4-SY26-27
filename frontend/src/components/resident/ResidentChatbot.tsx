@@ -25,9 +25,13 @@ import {
 /** Suggested opening questions shown before the first exchange. */
 const QUICK_REPLIES = [
   "How do I request a Barangay Clearance?",
-  "How do I report an incident?",
-  "Where do I see announcements?",
-  "Sino ang kasalukuyang kapitan ng barangay?",
+  "Ano ang kailangan para sa Certificate of Indigency?",
+  "Paano mag-report ng incident?",
+  "Emergency hotline ng barangay?",
+  "Sino ang mga opisyal ng barangay?",
+  "Bukas ba ang barangay hall ngayon?",
+  "May bagong anunsyo o programa ba?",
+  "Bakit hindi ako makapag-start ng Live Chat?",
 ];
 
 /** Panel width on screens wide enough for the full panel. */
