@@ -90,6 +90,25 @@ Seeded test accounts (see `backend/src/scripts/seed-data.ts`):
 > you'll be prompted to enroll a TOTP authenticator (e.g. Google Authenticator)
 > before you can complete the sign-in.
 
+## AI Assistant (Chatbot)
+
+The resident portal includes **KaBarangay Assistant** — an in-app chatbot
+(bottom-right button) that answers questions about using the portal and about
+the barangay itself. It answers from live data: the current barangay captain,
+officials, latest announcements, and barangay contact details (phone, email,
+address, office hours, emergency hotline).
+
+- **Grounding**: a live database snapshot (`Barangay`, `Official`,
+  `Announcement`) is injected into the model prompt at request time — see
+  `backend/src/shared/chatbot.ts` (`buildPortalContext`).
+- **Languages**: replies in the language the user writes in (Filipino/Tagalog,
+  Cebuano, Ilocano, English, …).
+- **Provider**: `CHATBOT_PROVIDER` (`deepseek` default, or `huggingface`) with
+  the matching `DEEPSEEK_*` / `HUGGINGFACE_*` environment variables. With no key
+  configured, a built-in keyword fallback answers from the same knowledge base
+  (useful for local development).
+- **Scope**: informational only — it never performs actions or changes data.
+
 ## Environment Variables
 
 Both applications read configuration from a `.env` file (not committed to
